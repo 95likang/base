@@ -5,6 +5,8 @@ import { logger } from 'hono/logger'
 import { auth } from './auth'
 import { usersRoute } from './routes/users'
 
+process.loadEnvFile?.()
+
 const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3001')
   .split(',')
   .map((origin) => origin.trim())
