@@ -1,0 +1,22 @@
+{
+  "name": "my-universal-template",
+  "private": true,
+  "packageManager": "pnpm@10.6.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+    "db:push": "turbo run db:push",
+    "db:generate": "turbo run db:generate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.2",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "client",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "api": "workspace:*",
+    "hono": "^4.13.13",
+    "next": "^15.3.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@repo/tsconfig": "workspace:*",
+    "@tailwindcss/postcss": "^4.1.4",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "tailwindcss": "^4.1.4",
+    "typescript": "^5.8.3"
+  }
+}
