@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
+import { onError } from './lib/api-error'
 import { usersRoute } from './routes/users'
 
 process.loadEnvFile?.()
@@ -15,6 +16,8 @@ const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://l
 const app = new Hono()
 
 app.use('*', logger())
+// 全局错误处理：所有未捕获异常统一为 { error: { code, message } } 形状
+app.onError(onError)
 app.use(
   '/api/*',
   cors({

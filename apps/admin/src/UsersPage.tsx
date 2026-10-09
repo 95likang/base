@@ -27,7 +27,11 @@ export function UsersPage() {
   const createUser = useMutation({
     mutationFn: async (input: { name: string; email: string }) => {
       const res = await client.api.users.$post({ json: input })
-      if (!res.ok) throw new Error('Failed to create user')
+      if (!res.ok) {
+        // 统一错误体：{ error: { code, message } }（onError/zValidator 响应不参与 RPC 类型推导，需断言）
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
+        throw new Error(body?.error?.message ?? 'Failed to create user')
+      }
       return res.json()
     },
     onSuccess: () => {
@@ -69,6 +73,7 @@ export function UsersPage() {
         >
           {createUser.isPending ? 'Adding…' : 'Add user'}
         </button>
+        {createUser.isError && <p className="text-red-600">{createUser.error.message}</p>}
       </form>
 
       {usersQuery.isPending && <p>Loading…</p>}
