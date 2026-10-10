@@ -1,21 +1,30 @@
-import { serverClient } from '@/lib/api'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
+import { createServerClient } from '@/lib/api'
 
 // Always fetch fresh on each request for this demo.
 export const dynamic = 'force-dynamic'
 
 /**
  * Next.js 15 Server Component consuming the same `hc<AppType>` RPC instance on
- * the server. The call is awaited during SSR, so the browser never sees the API
- * origin and the response is fully typed from the Hono route definition.
+ * the server. The browser's session cookie is forwarded so protected routes
+ * work; visitors without a session get a login prompt instead of user data.
  */
 export default async function HomePage() {
+  const cookieStore = await cookies()
+  const serverClient = createServerClient(cookieStore.toString())
   const res = await serverClient.api.users.$get({ query: { limit: '10' } })
 
   if (!res.ok) {
     return (
       <main className="mx-auto max-w-xl p-8">
         <h1 className="mb-6 text-2xl font-bold">Users (SSR)</h1>
-        <p className="text-red-500">Failed to fetch users from API.</p>
+        <p className="text-red-500">
+          Failed to load users ({res.status}).{' '}
+          <Link href="/login" className="underline">
+            Please sign in first.
+          </Link>
+        </p>
       </main>
     )
   }

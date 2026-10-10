@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { db } from '../db'
 import { users } from '../db/schema'
 import { ApiError, validationHook } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 
 const listQuerySchema = z.object({
   // Optional case-insensitive search over the user's name.
@@ -29,7 +30,9 @@ const UNIQUE_VIOLATION = '23505'
  * the database, and the `.get`/`.post` chaining preserves the response types
  * that Hono RPC exposes to the frontends.
  */
-export const usersRoute = new Hono()
+export const usersRoute = new Hono<AuthEnv>()
+  // 所有用户接口都需要登录（401 由全局 onError 转成统一错误体）
+  .use('*', requireAuth)
   .get('/', zValidator('query', listQuerySchema, validationHook), async (c) => {
     const { search, limit } = c.req.valid('query')
 
