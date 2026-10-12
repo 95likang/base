@@ -184,5 +184,23 @@ export function createLoopGuard() {
     return { stuck: false }
   }
 
-  return { detect, recordCall, recordResult }
+  return {
+    detect,
+    recordCall,
+    recordResult,
+    /**
+     * 记录当前历史快照（步骤开始前调用），重试失败步骤时用 restore 回滚。
+     *
+     * 注意：在 agentLoop 当前的 `forwarded` 守卫下（recordCall 与 send 同步执行，
+     * 未转发则不可能有记录），restore 实际是空操作。保留这对方法是为未来的
+     * "缓冲到步末再转发"模式预留事务边界——那时 recordCall 已发生而内容未转发，
+     * 回滚从空操作变为必需，缺失会导致重试重放的调用被双重计数而误熔断。
+     */
+    snapshot: (): ToolCallRecord[] => history.slice(),
+    /** 回滚到快照：失败尝试中的调用记录不能留在窗口里，否则重试的相同调用会被双重计数 */
+    restore: (mark: ToolCallRecord[]) => {
+      history.length = 0
+      history.push(...mark)
+    },
+  }
 }

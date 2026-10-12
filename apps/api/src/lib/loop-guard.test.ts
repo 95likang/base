@@ -149,6 +149,21 @@ describe('recordResult 回填', () => {
   })
 })
 
+describe('快照/回滚（重试支持）', () => {
+  it('restore 后失败尝试的记录不参与检测', () => {
+    const guard = createLoopGuard()
+    guard.recordCall('getWeather', { city: '北京' })
+    const mark = guard.snapshot()
+    // 失败尝试中的记录
+    guard.recordCall('getWeather', { city: '北京' })
+    guard.recordCall('getWeather', { city: '北京' })
+    // 重试回滚
+    guard.restore(mark)
+    // 回滚后重放相同调用：历史只有 1 条，不触发 warning
+    expect(guard.detect('getWeather', { city: '北京' })).toEqual({ stuck: false })
+  })
+})
+
 describe('实例隔离', () => {
   it('新实例不受旧实例历史影响', () => {
     const old = createLoopGuard()
