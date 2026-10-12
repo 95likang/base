@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { db } from '../db'
 import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
-import { agentLoop } from '../lib/agent-loop'
+import { agentLoop, type BudgetState } from '../lib/agent-loop'
 import { anthropic } from '../lib/ai'
 import { ApiError, validationHook } from '../lib/api-error'
 import { calculatorTool } from '../tools/calculator'
@@ -14,6 +14,8 @@ import { weatherTool } from '../tools/weather'
 
 /** 系统提示词 */
 const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
+/** 单次请求的 Token 预算上限（所有步骤累计） */
+const TOKEN_BUDGET = 200_000
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
 const chatPostSchema = z.object({
@@ -125,8 +127,10 @@ export const chatRoute = new Hono().post(
       // 提供 originalMessages：流会为回复消息生成 id，onEnd 能拿到完整消息列表
       originalMessages: messages,
       execute: async ({ writer }) => {
-        // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token
-        await agentLoop(model, tools, modelMessages, SYSTEM, writer, c.req.raw.signal)
+        // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token；
+        // Token 预算限制单次请求的总消耗（所有步骤累计）
+        const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
+        await agentLoop(model, tools, modelMessages, SYSTEM, writer, c.req.raw.signal, budget)
       },
       onEnd: async ({ messages: finalMessages, isAborted }) => {
         // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）

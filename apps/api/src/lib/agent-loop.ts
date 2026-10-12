@@ -9,6 +9,15 @@ const MAX_STEPS = 15
 const MAX_RETRIES = 3
 
 /**
+ * Token 预算：由调用方持有（跨轮持续累计），agentLoop 每步成功后累加用量，
+ * 超限时终止循环，防止长对话/工具链无节制烧 token。
+ */
+export interface BudgetState {
+  used: number
+  limit: number
+}
+
+/**
  * 手动驱动的工具循环（不用 stopWhen，完全掌控每一步）。
  *
  * 每轮：streamText 只跑一步 → 遍历 fullStream 转发给前端 →
@@ -24,6 +33,7 @@ const MAX_RETRIES = 3
  *
  * @param writer UI 消息流写入器，chunk 实时转发给前端
  * @param abortSignal 客户端断开/取消时中止循环，停止后续 LLM 调用
+ * @param budget 可选 Token 预算（调用方持有），耗尽时终止循环
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -32,12 +42,14 @@ export async function agentLoop(
   system: string,
   writer: UIMessageStreamWriter,
   abortSignal?: AbortSignal,
+  budget?: BudgetState,
 ): Promise<void> {
   // 循环检测器：请求级实例，与本次 agentLoop 生命周期一致
   const guard = createLoopGuard()
   let steps = 0
   let finishedByReply = false
   let trippedByGuard = false
+  let stoppedByBudget = false
 
   while (steps < MAX_STEPS) {
     steps++
@@ -166,6 +178,11 @@ export async function agentLoop(
         }
 
         stepMessages = (await result.response).messages
+        if (budget) {
+          // 累计本步用量（result.usage 为 SDK 拍平后的形状；provider 未上报时为 undefined）
+          const usage = await result.usage
+          budget.used += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+        }
         break // 本步成功，跳出重试循环
       } catch (error) {
         // 三个不重试的条件：已转发过内容 / 重试次数用尽 / 错误类型不可重试（如 400）
@@ -202,6 +219,16 @@ export async function agentLoop(
       break
     }
 
+    // Token 预算耗尽 → 不再发起下一步 LLM 调用（本步已是最终回复时不会走到这里）
+    if (budget) {
+      const pct = Math.round((budget.used / budget.limit) * 100)
+      console.log(`  [Token] ${budget.used}/${budget.limit} (${pct}%)`)
+      if (budget.used > budget.limit) {
+        stoppedByBudget = true
+        break
+      }
+    }
+
     // 有工具调用 → 把本步消息追加进上下文，下一轮模型会看到工具执行结果
     messages.push(...stepMessages)
 
@@ -215,11 +242,17 @@ export async function agentLoop(
   }
 
   // 异常收尾时补提示，避免前端静默结束
-  if (trippedByGuard || !finishedByReply) {
-    const id = trippedByGuard ? 'loop-guard-tripped' : 'step-limit'
+  if (trippedByGuard || stoppedByBudget || !finishedByReply) {
+    const id = trippedByGuard
+      ? 'loop-guard-tripped'
+      : stoppedByBudget
+        ? 'token-budget-exhausted'
+        : 'step-limit'
     const delta = trippedByGuard
       ? '（检测到无进展的重复操作，已强制终止。）'
-      : '（已达工具调用步数上限，请继续提问。）'
+      : stoppedByBudget
+        ? '（已达到本次回复的 Token 预算上限，如有需要请继续提问。）'
+        : '（已达工具调用步数上限，请继续提问。）'
     writer.write({ type: 'text-start', id })
     writer.write({ type: 'text-delta', id, delta })
     writer.write({ type: 'text-end', id })
