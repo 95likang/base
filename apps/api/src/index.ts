@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
 import { onError } from './lib/api-error'
+import { chatRoute, chatsRoute } from './routes/chat'
 import { usersRoute } from './routes/users'
 
 process.loadEnvFile?.()
@@ -30,7 +31,11 @@ app.use(
 app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw))
 
 // Mount feature routers under /api. Chaining `.route()` keeps the RPC types.
-const routes = app.get('/', (c) => c.json({ status: 'ok' })).route('/api/users', usersRoute)
+const routes = app
+  .get('/', (c) => c.json({ status: 'ok' }))
+  .route('/api/users', usersRoute)
+  .route('/api/chats', chatsRoute)
+  .route('/api/chat', chatRoute)
 
 const port = Number(process.env.PORT ?? 3000)
 serve({ fetch: app.fetch, port }, (info) => {

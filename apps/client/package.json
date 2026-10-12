@@ -9,6 +9,8 @@
     "lint": "biome check ."
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.140",
+    "ai": "^7.0.137",
     "api": "workspace:*",
     "better-auth": "^1.7.7",
     "hono": "^4.13.13",
