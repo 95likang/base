@@ -12,7 +12,7 @@ const MAX_STEPS = 5
  *   没有工具调用：模型已给出最终文本回复，循环结束。
  *
  * @param writer UI 消息流写入器，chunk 实时转发给前端
- * @returns 本轮对话新产生的全部消息（含最终文本回复），可直接用于落库/继续对话
+ * @param abortSignal 客户端断开/取消时中止循环，停止后续 LLM 调用
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -20,8 +20,10 @@ export async function agentLoop(
   messages: ModelMessage[],
   system: string,
   writer: UIMessageStreamWriter,
-): Promise<ModelMessage[]> {
+  abortSignal?: AbortSignal,
+): Promise<void> {
   let steps = 0
+  let finishedByReply = false
 
   while (steps < MAX_STEPS) {
     steps++
@@ -31,6 +33,7 @@ export async function agentLoop(
       system,
       messages,
       tools,
+      abortSignal,
       // 不设 stopWhen：单次 streamText 默认只执行一步
     })
 
@@ -77,17 +80,39 @@ export async function agentLoop(
             output: part.output,
           })
           break
+        case 'tool-error':
+          // 工具 execute 抛异常：转发给前端，同时继续循环让模型看到错误并自行处理
+          hasToolCall = true
+          writer.write({
+            type: 'tool-output-error',
+            toolCallId: part.toolCallId,
+            errorText: part.error instanceof Error ? part.error.message : String(part.error),
+          })
+          break
         case 'error':
           throw part.error // 由 createUIMessageStream 的 onError 统一处理
       }
     }
 
     // 本步没有工具调用 → 模型直接给出文本回复，结束循环
-    if (!hasToolCall) break
+    if (!hasToolCall) {
+      finishedByReply = true
+      break
+    }
 
     // 有工具调用 → 把本步消息追加进上下文，下一轮模型会看到工具执行结果
     messages.push(...(await result.response).messages)
   }
 
-  return messages
+  // 步数耗尽而非模型主动收尾：补一条提示，避免前端静默结束
+  if (!finishedByReply) {
+    const id = 'step-limit'
+    writer.write({ type: 'text-start', id })
+    writer.write({
+      type: 'text-delta',
+      id,
+      delta: '（已达工具调用步数上限，请继续提问。）',
+    })
+    writer.write({ type: 'text-end', id })
+  }
 }

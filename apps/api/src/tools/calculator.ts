@@ -78,7 +78,7 @@ function evaluateExpression(expr: string): number {
 export const calculatorTool = tool({
   description: '计算数学表达式，支持 + - * / % 和括号，如 "(1 + 2) * 3"。需要精确数值计算时使用。',
   inputSchema: z.object({
-    expression: z.string().describe('算术表达式，如 "1.5 * (2 + 3)"'),
+    expression: z.string().max(500).describe('算术表达式，如 "1.5 * (2 + 3)"'),
   }),
   execute: async ({ expression }) => {
     try {
