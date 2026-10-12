@@ -1,11 +1,17 @@
 import type { UIMessage } from 'ai'
-import { convertToModelMessages, streamText } from 'ai'
+import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { desc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { db } from '../db'
 import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
+import { agentLoop } from '../lib/agent-loop'
 import { anthropic } from '../lib/ai'
 import { ApiError } from '../lib/api-error'
+import { calculatorTool } from '../tools/calculator'
+import { weatherTool } from '../tools/weather'
+
+/** 系统提示词 */
+const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
 
 /**
  * Chats sub-router — 会话持久化。
@@ -87,22 +93,27 @@ export const chatRoute = new Hono().post('/', async (c) => {
     }
   }
 
-  const result = streamText({
-    model: anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'),
-    system: 'You are a helpful assistant. 用中文简洁回答。',
-    messages: await convertToModelMessages(messages),
-  })
+  const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
+  const tools = { getWeather: weatherTool, calculator: calculatorTool }
+  const modelMessages = await convertToModelMessages(messages)
 
-  // 默认会把流内错误吞成 "An error occurred."，这里把真实原因打到服务端日志方便排查
-  return result.toUIMessageStreamResponse({
+  const uiStream = createUIMessageStream({
     onError: (err) => {
+      // 把真实原因打到服务端日志，前端只拿消息文本
       console.error('[chat] stream error:', err)
       return err instanceof Error ? err.message : 'An error occurred.'
     },
-    onFinish: async ({ responseMessage }) => {
-      // AI 回复落库（含 reasoning parts，前端以折叠形式展示）。
-      // 注意：v7 服务端流的 responseMessage.id 为空串，需自行生成 id，
-      // 否则第二条 assistant 消息会撞 '' 的唯一键，把整个流搞崩。
+    // 提供 originalMessages：流会为回复消息生成 id，onEnd 能拿到完整消息列表
+    originalMessages: messages,
+    execute: async ({ writer }) => {
+      await agentLoop(model, tools, modelMessages, SYSTEM, writer)
+    },
+    onEnd: async ({ messages: finalMessages, isAborted }) => {
+      // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）
+      const responseMessage = finalMessages[finalMessages.length - 1]
+      if (isAborted || !responseMessage || responseMessage.role !== 'assistant') {
+        return
+      }
       try {
         await db.insert(chatMessage).values({
           id: responseMessage.id || crypto.randomUUID(),
@@ -116,4 +127,6 @@ export const chatRoute = new Hono().post('/', async (c) => {
       }
     },
   })
+
+  return createUIMessageStreamResponse({ stream: uiStream })
 })
