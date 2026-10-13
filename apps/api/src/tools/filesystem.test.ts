@@ -114,6 +114,18 @@ describe('edit_file / glob / grep / bash', () => {
     expect(String(empty)).toContain('没有找到')
   })
 
+  it('glob：绝对路径/.. 模式被守卫拒绝', async () => {
+    const { glob } = await load()
+    // fast-glob 对绝对路径模式忽略 cwd，.. 段可逃逸工作区——必须拦截
+    const abs = await glob.execute({ pattern: 'C:/**' }, {})
+    expect(String(abs)).toContain('非法 pattern')
+    const dotdot = await glob.execute({ pattern: '../**/*.ts' }, {})
+    expect(String(dotdot)).toContain('非法 pattern')
+    // 普通相对模式不受影响
+    const ok = await glob.execute({ pattern: 'src/*.ts' }, {})
+    expect(String(ok)).toContain('src/a.ts')
+  })
+
   it('grep：返回相对路径+行号+内容', async () => {
     const { writeFile, grep } = await load()
     await fs.mkdir(path.join(root, 'grep-dir'), { recursive: true })
@@ -134,5 +146,11 @@ describe('edit_file / glob / grep / bash', () => {
     const { bash } = await load()
     const out = await bash.execute({ command: 'echo hi-from-bash' }, {})
     expect(String(out)).toContain('hi-from-bash')
+  })
+
+  it('bash：失败命令返回 exit 状态而非抛异常', async () => {
+    const { bash } = await load()
+    const out = await bash.execute({ command: 'definitely-not-a-command-xyz' }, {})
+    expect(String(out)).toContain('exit 1')
   })
 })

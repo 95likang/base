@@ -1,8 +1,12 @@
-import { execSync } from 'node:child_process'
+import { exec } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative, resolve as resolvePath, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
+import { promisify } from 'node:util'
 import fg from 'fast-glob'
-import type { ToolDefinition } from '../lib/tool-registry'
+import type { ToolDefinition, ToolExecuteOptions } from '../lib/tool-registry'
+
+/** 异步执行 shell：execSync 会阻塞整个事件循环，命令跑多久所有请求就挂多久 */
+const execAsync = promisify(exec)
 
 /** 工作区根目录：文件工具只能访问其中的相对路径 */
 const WORKSPACE_ROOT = resolvePath(
@@ -148,6 +152,14 @@ export const globTool: ToolDefinition = {
   isConcurrencySafe: true,
   isReadOnly: true,
   execute: async ({ pattern, path = '.' }: { pattern: string; path?: string }) => {
+    // fast-glob 对绝对路径模式会忽略 cwd（文档化行为），".." 段可逃逸工作区，
+    // Windows 盘符前缀（C:...）同理——守卫开启时一律拒绝，只允许工作区内相对模式
+    if (
+      GUARD_ENABLED &&
+      (isAbsolute(pattern) || /^[a-zA-Z]:/.test(pattern) || pattern.split(/[/\\]/).includes('..'))
+    ) {
+      return `非法 pattern：只允许工作区内的相对模式（不允许绝对路径或 ".."）`
+    }
     const results = await fg(pattern, {
       cwd: resolve(path),
       ignore: ['node_modules/**', '.git/**'],
@@ -255,25 +267,35 @@ export const bashTool: ToolDefinition = {
   isConcurrencySafe: false,
   isReadOnly: false,
   maxResultChars: 3000,
-  execute: async ({ command }: { command: string }) => {
+  execute: async ({ command }: { command: string }, options: ToolExecuteOptions) => {
     try {
-      execSync('echo test', { stdio: 'ignore', cwd: WORKSPACE_ROOT })
+      await execAsync('echo test', { cwd: WORKSPACE_ROOT })
     } catch {
       return `[bash 不可用] 当前 Sandbox 不支持 shell 命令。本地终端运行 pnpm start 可使用 bash 工具。`
     }
 
     try {
-      const output = execSync(command, {
+      const { stdout } = await execAsync(command, {
         encoding: 'utf-8',
         timeout: 10000,
         maxBuffer: 1024 * 1024,
-        stdio: ['pipe', 'pipe', 'pipe'],
         cwd: WORKSPACE_ROOT,
+        signal: options.abortSignal,
       })
-      return output || '(命令执行成功，无输出)'
+      return stdout || '(命令执行成功，无输出)'
     } catch (err) {
-      // execSync 失败时 err 携带 stdout/stderr/status（ExecException），做结构化收窄
-      const e = err as { stderr?: string; stdout?: string; status?: number; message?: string }
+      // exec 失败时 err 携带 stdout/stderr/status/killed/signal，做结构化收窄
+      const e = err as {
+        stderr?: string
+        stdout?: string
+        status?: number | null
+        message?: string
+        killed?: boolean
+        signal?: NodeJS.Signals | null
+      }
+      if (e.killed) {
+        return `命令被终止 (${e.signal ?? '超时或中止'})`
+      }
       const stderr = e.stderr || ''
       const stdout = e.stdout || ''
       return `命令执行失败 (exit ${e.status || 1}):\n${stderr || stdout || e.message}`
