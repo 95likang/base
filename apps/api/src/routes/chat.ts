@@ -9,7 +9,17 @@ import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
 import { agentLoop, type BudgetState } from '../lib/agent-loop'
 import { anthropic } from '../lib/ai'
 import { ApiError, validationHook } from '../lib/api-error'
+import { ToolRegistry } from '../lib/tool-registry'
 import { calculatorTool } from '../tools/calculator'
+import {
+  bashTool,
+  editFileTool,
+  globTool,
+  grepTool,
+  listDirectoryTool,
+  readFileTool,
+  writeFileTool,
+} from '../tools/filesystem'
 import { weatherTool } from '../tools/weather'
 
 /** 系统提示词 */
@@ -115,7 +125,22 @@ export const chatRoute = new Hono().post(
     }
 
     const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
-    const tools = { getWeather: weatherTool, calculator: calculatorTool }
+    // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
+    // 文件工具限制在 TOOL_WORKSPACE_DIR 指定的工作区内（默认 <cwd>/workspace），
+    // 路径越界一律拒绝；TOOL_WORKSPACE_GUARD=false 可关闭该守卫（仅限本地开发）。
+    const registry = new ToolRegistry()
+    registry.register(
+      weatherTool,
+      calculatorTool,
+      readFileTool,
+      writeFileTool,
+      listDirectoryTool,
+      editFileTool,
+      globTool,
+      grepTool,
+      bashTool,
+    )
+    const tools = registry.toAISDKFormat()
     const modelMessages = await convertToModelMessages(messages)
 
     const uiStream = createUIMessageStream({

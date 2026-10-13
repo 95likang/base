@@ -1,5 +1,7 @@
-import { tool } from 'ai'
-import { z } from 'zod'
+import type { ToolDefinition } from '../lib/tool-registry'
+
+/** 表达式长度上限：LLM 输出不可信，超长输入直接拒绝，不进入解析器 */
+const MAX_EXPRESSION_LENGTH = 500
 
 /**
  * 四则运算解析器（递归下降）。
@@ -22,7 +24,6 @@ function evaluateExpression(expr: string): number {
       const op = expr.charAt(pos++)
       const rhs = parseTerm()
       value = op === '+' ? value + rhs : value - rhs
-      skipSpaces()
     }
     return value
   }
@@ -74,14 +75,35 @@ function evaluateExpression(expr: string): number {
   return result
 }
 
-/** 计算器工具：求值四则运算表达式 */
-export const calculatorTool = tool({
+/**
+ * 计算器工具：只读、并发安全（纯计算，无副作用）。
+ * 输入长度在 execute 内再防御一次——JSON Schema 的 maxLength
+ * 只是给模型看的声明，不能依赖它做运行时兜底。
+ */
+export const calculatorTool: ToolDefinition = {
+  name: 'calculator',
   description: '计算数学表达式，支持 + - * / % 和括号，如 "(1 + 2) * 3"。需要精确数值计算时使用。',
-  inputSchema: z.object({
-    expression: z.string().max(500).describe('算术表达式，如 "1.5 * (2 + 3)"'),
-  }),
-  execute: async ({ expression }) => {
+  parameters: {
+    type: 'object',
+    properties: {
+      expression: {
+        type: 'string',
+        maxLength: MAX_EXPRESSION_LENGTH,
+        description: '算术表达式，如 "1.5 * (2 + 3)"',
+      },
+    },
+    required: ['expression'],
+    additionalProperties: false,
+  },
+  isConcurrencySafe: true,
+  isReadOnly: true,
+  maxResultChars: 1000,
+  execute: async (input: { expression: string }) => {
+    const { expression } = input
     try {
+      if (expression.length > MAX_EXPRESSION_LENGTH) {
+        return { expression: `${expression.slice(0, 50)}…`, error: '表达式过长' }
+      }
       const result = evaluateExpression(expression)
       return { expression, result }
     } catch (err) {
@@ -91,4 +113,4 @@ export const calculatorTool = tool({
       }
     }
   },
-})
+}

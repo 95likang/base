@@ -1,6 +1,6 @@
 export * from './auth-schema'
-export * from './chat-schema'
 export { user as users } from './auth-schema'
+export * from './chat-schema'
 
 import type { user } from './auth-schema'
 
