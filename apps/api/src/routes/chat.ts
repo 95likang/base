@@ -20,8 +20,9 @@ import {
   readFileTool,
   writeFileTool,
 } from '../tools/filesystem'
+import { pickSearchTool } from '../tools/search'
 import { weatherTool } from '../tools/weather'
-import { fetchUrlTool, startPreviewTool } from '../tools/web'
+import { startPreviewTool, webFetchTool } from '../tools/web'
 
 /** 系统提示词 */
 const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
@@ -133,6 +134,7 @@ export const chatRoute = new Hono().post(
     registry.register(
       weatherTool,
       calculatorTool,
+      pickSearchTool(),
       readFileTool,
       writeFileTool,
       listDirectoryTool,
@@ -140,7 +142,7 @@ export const chatRoute = new Hono().post(
       globTool,
       grepTool,
       bashTool,
-      fetchUrlTool,
+      webFetchTool,
       startPreviewTool,
     )
     const tools = registry.toAISDKFormat()

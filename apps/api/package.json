@@ -25,12 +25,14 @@
     "fast-glob": "^3.3.3",
     "hono": "^4.13.13",
     "pg": "^8.14.1",
+    "turndown": "^7.2.4",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@repo/tsconfig": "workspace:*",
     "@types/node": "^22.14.0",
     "@types/pg": "^8.11.11",
+    "@types/turndown": "^5.0.6",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",

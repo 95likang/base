@@ -2,19 +2,24 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { createServer } from 'node:http'
 import { extname, join, sep } from 'node:path'
+import TurndownService from 'turndown'
 import type { ToolDefinition } from '../lib/tool-registry'
 import { WORKSPACE_ROOT } from './filesystem'
+
+/** HTML → Markdown 转换器：剥离噪音标签，标题/代码块用 ATX/fenced 风格 */
+const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
+turndown.remove(['script', 'style', 'nav', 'footer', 'header', 'iframe'])
 
 /** 模拟网页内容（命中前缀直接返回，真实 URL 走下方 fetch 逻辑） */
 const MOCK_PAGES: Record<string, string> = {
   'https://example.com/':
-    'Example Domain. 这是一个演示用页面：本工具会把 HTML 剥离为纯文本返回给模型阅读。',
+    'Example Domain. 这是一个演示用页面：本工具会把 HTML 转换为 Markdown 返回给模型阅读。',
 }
 
-export const fetchUrlTool: ToolDefinition = {
-  name: 'fetch_url',
+export const webFetchTool: ToolDefinition = {
+  name: 'web_fetch',
   description:
-    '抓取指定 URL 的网页内容并转换为纯文本（自动剥离 HTML 标签）。让 Agent 阅读外部资料、文档、博客',
+    '抓取指定 URL 的网页内容并转换为 Markdown（保留标题、链接、代码块结构）。搭配 web_search 使用——先搜索拿到链接，再用这个工具读取详细内容',
   parameters: {
     type: 'object',
     properties: {
@@ -25,7 +30,7 @@ export const fetchUrlTool: ToolDefinition = {
   },
   isConcurrencySafe: true,
   isReadOnly: true,
-  maxResultChars: 1500,
+  maxResultChars: 3000,
   execute: async ({ url }: { url: string }) => {
     if (!/^https?:\/\//.test(url)) return '错误：URL 必须以 http:// 或 https:// 开头'
 
@@ -41,14 +46,8 @@ export const fetchUrlTool: ToolDefinition = {
       if (!res.ok) return `请求失败：HTTP ${res.status}`
 
       const html = await res.text()
-      return (
-        html
-          .replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim() || '页面无文本内容'
-      )
+      // 空结果兜底：纯脚本/纯媒体页面转不出 Markdown
+      return turndown.turndown(html).trim() || '页面无文本内容'
     } catch (err) {
       const e = err as { message?: string }
       return `抓取失败：${e.message ?? String(err)}`
