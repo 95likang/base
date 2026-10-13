@@ -8,8 +8,8 @@ import type { ToolDefinition, ToolExecuteOptions } from '../lib/tool-registry'
 /** 异步执行 shell：execSync 会阻塞整个事件循环，命令跑多久所有请求就挂多久 */
 const execAsync = promisify(exec)
 
-/** 工作区根目录：文件工具只能访问其中的相对路径 */
-const WORKSPACE_ROOT = resolvePath(
+/** 工作区根目录：文件工具只能访问其中的相对路径（导出给其他工具复用，如预览服务器） */
+export const WORKSPACE_ROOT = resolvePath(
   process.env.TOOL_WORKSPACE_DIR ?? join(process.cwd(), 'workspace'),
 )
 

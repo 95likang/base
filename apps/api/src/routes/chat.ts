@@ -21,6 +21,7 @@ import {
   writeFileTool,
 } from '../tools/filesystem'
 import { weatherTool } from '../tools/weather'
+import { fetchUrlTool, startPreviewTool } from '../tools/web'
 
 /** 系统提示词 */
 const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
@@ -139,6 +140,8 @@ export const chatRoute = new Hono().post(
       globTool,
       grepTool,
       bashTool,
+      fetchUrlTool,
+      startPreviewTool,
     )
     const tools = registry.toAISDKFormat()
     const modelMessages = await convertToModelMessages(messages)
