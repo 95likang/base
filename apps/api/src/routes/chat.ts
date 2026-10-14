@@ -9,7 +9,7 @@ import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
 import { agentLoop, type BudgetState } from '../lib/agent-loop'
 import { anthropic } from '../lib/ai'
 import { ApiError, validationHook } from '../lib/api-error'
-import { ToolRegistry } from '../lib/tool-registry'
+import { type ToolDefinition, ToolRegistry } from '../lib/tool-registry'
 import { calculatorTool } from '../tools/calculator'
 import {
   bashTool,
@@ -145,10 +145,49 @@ export const chatRoute = new Hono().post(
       bashTool,
       webFetchTool,
       startPreviewTool,
-      // MCP 外部工具（MCP_SERVERS 未配置时为空数组）
+      // MCP 外部工具（MCP_SERVERS 未配置时为空数组）——延迟加载，不占初始上下文
       ...(await getMcpTools()),
     )
+    // 延迟工具的发现入口：激活后 registry 原地更新 ToolSet，后续步骤立即可用
+    const toolSearchTool: ToolDefinition = {
+      name: 'tool_search',
+      description:
+        '获取延迟工具的完整定义。传入工具名（从系统提示的延迟工具列表中选取），激活后即可直接调用',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: '工具名，如 "mcp__github__list_issues"。支持逗号分隔多个工具名',
+          },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+      isConcurrencySafe: true,
+      isReadOnly: true,
+      execute: async ({ query }: { query: string }) => {
+        const results = registry.searchTools(query)
+        if (results.length === 0) return `没有找到匹配 "${query}" 的工具`
+        return results.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        }))
+      },
+    }
+    registry.register(toolSearchTool)
     const tools = registry.toAISDKFormat()
+    // 系统提示附带延迟工具目录，模型据此决定是否通过 tool_search 激活
+    const system = SYSTEM + registry.getDeferredToolSummary()
+    // 工具统计：观测延迟加载对 prompt token 的节省效果
+    const allCount = registry.getAll().length
+    const activeCount = registry.getActiveTools().length
+    const estimate = registry.countTokenEstimate()
+    console.log(
+      `[工具统计] 全部 ${allCount} | 活跃 ${activeCount} | 延迟 ${allCount - activeCount} | ` +
+        `Token 估算 ~${estimate.active}（活跃）+ ~${estimate.deferred}（延迟，不占 prompt）`,
+    )
     const modelMessages = await convertToModelMessages(messages)
 
     const uiStream = createUIMessageStream({
@@ -163,7 +202,7 @@ export const chatRoute = new Hono().post(
         // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token；
         // Token 预算限制单次请求的总消耗（所有步骤累计）
         const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
-        await agentLoop(model, tools, modelMessages, SYSTEM, writer, c.req.raw.signal, budget)
+        await agentLoop(model, tools, modelMessages, system, writer, c.req.raw.signal, budget)
       },
       onEnd: async ({ messages: finalMessages, isAborted }) => {
         // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）

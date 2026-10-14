@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { type ToolDefinition, ToolRegistry, truncateResult } from './tool-registry'
 
 /**
@@ -134,6 +134,96 @@ describe('执行层：锁协调', () => {
     const tools = asExecutables(registry.toAISDKFormat())
     await tools.spy.execute({}, { abortSignal: controller.signal })
     expect(received).toBe(controller.signal)
+  })
+})
+
+describe('延迟加载层', () => {
+  it('shouldDefer 工具不进入初始 ToolSet，激活后才出现', () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      makeTool({ name: 'normal' }),
+      makeTool({ name: 'mcp__x__hidden', shouldDefer: true, searchHint: 'x hidden' }),
+    )
+    const tools = asExecutables(registry.toAISDKFormat())
+    expect(Object.keys(tools)).toEqual(['normal'])
+
+    registry.searchTools('mcp__x__hidden')
+    expect(Object.keys(tools)).toEqual(['normal', 'mcp__x__hidden']) // 原地更新同一引用
+    expect(registry.getActiveTools().map((t) => t.name)).toEqual(['normal', 'mcp__x__hidden'])
+  })
+
+  it('searchTools 支持逗号分隔多个名字，未知名字忽略', () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      makeTool({ name: 'mcp__a__t1', shouldDefer: true }),
+      makeTool({ name: 'mcp__a__t2', shouldDefer: true }),
+    )
+    const results = registry.searchTools('mcp__a__t1, nope, mcp__a__t2')
+    expect(results.map((t) => t.name)).toEqual(['mcp__a__t1', 'mcp__a__t2'])
+  })
+
+  it('searchTools 不激活普通工具（普通工具本就可用）', () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'normal' }))
+    const results = registry.searchTools('normal')
+    expect(results).toEqual([])
+  })
+
+  it('searchTools 空/纯空白 query 不激活任何工具', () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'mcp__a__t', shouldDefer: true }))
+    expect(registry.searchTools('')).toEqual([])
+    expect(registry.searchTools('   ')).toEqual([])
+    expect(registry.getActiveTools().map((t) => t.name)).toEqual([])
+  })
+
+  it('精确名未命中时按 name/searchHint 子串兜底（大小写不敏感）', () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      makeTool({
+        name: 'mcp__github__list_issues',
+        shouldDefer: true,
+        searchHint: 'github 列出 issue',
+      }),
+      makeTool({ name: 'mcp__github__create_pr', shouldDefer: true }),
+    )
+    // 子串命中 name
+    expect(registry.searchTools('list_issues').map((t) => t.name)).toEqual([
+      'mcp__github__list_issues',
+    ])
+    // searchHint 已激活，不再重复出现
+    expect(registry.searchTools('列出')).toEqual([])
+    // 子串命中 searchHint
+    expect(registry.searchTools('create').map((t) => t.name)).toEqual(['mcp__github__create_pr'])
+  })
+
+  it('激活的 ToolSet 条目可正常执行（锁/截断包装完整）', async () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'mcp__a__t', shouldDefer: true, execute: async () => 'ok' }))
+    const tools = asExecutables(registry.toAISDKFormat())
+    registry.searchTools('mcp__a__t')
+    const key = 'mcp__a__t'
+    await expect(tools[key].execute({})).resolves.toBe('ok')
+  })
+
+  it('getDeferredToolSummary：有延迟工具时列出名字与提示，全部激活后为空', () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'mcp__a__t', shouldDefer: true, searchHint: 'a t 提示' }))
+    const summary = registry.getDeferredToolSummary()
+    expect(summary).toContain('tool_search')
+    expect(summary).toContain('mcp__a__t')
+    expect(summary).toContain('a t 提示')
+
+    registry.searchTools('mcp__a__t')
+    expect(registry.getDeferredToolSummary()).toBe('')
+  })
+
+  it('searchTools 激活后再次 toAISDKFormat 仍包含该工具（激活状态持久）', () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'mcp__a__t', shouldDefer: true }))
+    registry.searchTools('mcp__a__t')
+    const tools = asExecutables(registry.toAISDKFormat())
+    expect(Object.keys(tools)).toEqual(['mcp__a__t'])
   })
 })
 

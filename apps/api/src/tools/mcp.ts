@@ -90,6 +90,10 @@ function toToolDefinition(
     name: `mcp__${serverName}__${toolName}`,
     description: `[MCP:${serverName}] ${tool.description ?? toolName}`,
     parameters: tool.inputSchema,
+    // MCP server 动辄几十个工具，全部展开会占爆上下文 → 延迟加载，
+    // 模型从系统提示的延迟工具列表按名通过 tool_search 激活
+    shouldDefer: true,
+    searchHint: `${serverName} ${toolName} ${tool.description ?? ''}`,
     // MCP 工具的副作用未知，保守按独占执行（registry 默认），也不标记只读
     execute: async (input, { abortSignal }) => {
       const result = await client.callTool(

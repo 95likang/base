@@ -28,6 +28,14 @@ export interface ToolDefinition {
   isReadOnly?: boolean
   /** 结果截断上限（字符数），默认 3000 */
   maxResultChars?: number
+  /**
+   * 延迟加载：true 时不进入初始 ToolSet（省上下文），
+   * 模型需先通过 tool_search 按名获取后才激活（激活后一直可用）。
+   * 适合工具数量多的来源（如 MCP server）。
+   */
+  shouldDefer?: boolean
+  /** 延迟工具的检索提示（名字/功能关键词），展示在系统提示的延迟工具列表里 */
+  searchHint?: string
   // biome-ignore lint/suspicious/noExplicitAny: 入参来自 LLM、按 parameters 的 JSON Schema 动态校验，无静态类型
   execute: (input: any, options: ToolExecuteOptions) => Promise<unknown>
 }
@@ -52,6 +60,12 @@ export class ToolRegistry {
   /** 共享一个等待队列：唤醒后各自重检查条件，条件不满足则重新入队 */
   private waitQueue: Array<() => void> = []
 
+  // —— 延迟加载状态 ——
+  /** 已通过 searchTools 激活的延迟工具名 */
+  private discoveredTools = new Set<string>()
+  /** toAISDKFormat 最近产出的 ToolSet 引用：激活新工具时原地更新，让进行中的 agentLoop 立即可见 */
+  private emittedSet: Record<string, unknown> | undefined
+
   register(...tools: ToolDefinition[]): void {
     for (const tool of tools) {
       this.tools.set(tool.name, tool)
@@ -64,6 +78,102 @@ export class ToolRegistry {
 
   getAll(): ToolDefinition[] {
     return Array.from(this.tools.values())
+  }
+
+  /** 当前激活的工具（延迟且未发现的工具排除在外） */
+  getActiveTools(): ToolDefinition[] {
+    return this.getAll().filter((tool) => !this.isDeferred(tool))
+  }
+
+  /** 是否处于"延迟且未激活"状态 */
+  private isDeferred(tool: ToolDefinition): boolean {
+    return tool.shouldDefer === true && !this.discoveredTools.has(tool.name)
+  }
+
+  /**
+   * 延迟工具列表（拼接进系统提示），告知模型有哪些工具可通过 tool_search 激活。
+   * 没有延迟工具时返回空字符串。
+   */
+  getDeferredToolSummary(): string {
+    const deferred = this.getAll().filter((tool) => this.isDeferred(tool))
+    if (deferred.length === 0) return ''
+
+    const lines = deferred.map((t) => {
+      const hint = t.searchHint ? ` — ${t.searchHint}` : ''
+      return `  - ${t.name}${hint}`
+    })
+    return `\n以下工具可用，但需要先通过 tool_search 搜索获取完整定义：\n${lines.join('\n')}`
+  }
+
+  /**
+   * 激活延迟工具，返回激活结果。
+   * 匹配顺序：先按精确名（支持逗号分隔多个名字，如
+   * "mcp__github__list_issues,mcp__github__search_repositories"）；
+   * 全部未命中时按 name/searchHint 子串兜底（大小写不敏感），
+   * 模型记不全长全名也能用关键词找到。
+   * 激活即原地写入最近产出的 ToolSet：agentLoop 每步复用同一引用，
+   * 后续步骤的 streamText 能直接看到新工具，无需重传 tools。
+   * 只激活延迟工具——普通工具本就在初始 ToolSet 里。
+   */
+  searchTools(query: string): ToolDefinition[] {
+    const activate = (tool: ToolDefinition, results: ToolDefinition[]) => {
+      this.discoveredTools.add(tool.name)
+      results.push(tool)
+      if (this.emittedSet) {
+        this.emittedSet[tool.name] = this.wrapTool(tool)
+      }
+    }
+
+    const names = query
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean)
+
+    const results: ToolDefinition[] = []
+    for (const name of names) {
+      const tool = this.tools.get(name)
+      if (tool && tool.shouldDefer === true) {
+        activate(tool, results)
+      }
+    }
+    if (results.length > 0) return results
+
+    // 精确名未命中 → 子串兜底；空 query 不能进兜底（'' 的 includes 恒真，会激活全部延迟工具）
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    for (const tool of this.tools.values()) {
+      if (
+        this.isDeferred(tool) &&
+        (tool.name.toLowerCase().includes(q) || tool.searchHint?.toLowerCase().includes(q))
+      ) {
+        activate(tool, results)
+      }
+    }
+    return results
+  }
+
+  /**
+   * 工具定义的 Token 用量估算（JSON 序列化长度 / 4，粗略近似）：
+   * active = 进入初始 ToolSet 的工具；deferred = 延迟未激活、不占 prompt 的工具。
+   * 用于日志观测延迟加载的省 token 效果。
+   */
+  countTokenEstimate(): { active: number; deferred: number; total: number } {
+    let active = 0
+    let deferred = 0
+    for (const tool of this.tools.values()) {
+      const schemaSize = JSON.stringify({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }).length
+      const tokens = Math.ceil(schemaSize / 4)
+      if (this.isDeferred(tool)) {
+        deferred += tokens
+      } else {
+        active += tokens
+      }
+    }
+    return { active, deferred, total: active + deferred }
   }
 
   /** 共享锁：只要没有独占者在执行/等待唤醒，即可立即进入 */
@@ -104,41 +214,51 @@ export class ToolRegistry {
   }
 
   /**
-   * 执行层 + 截断层：把工具目录转换为 AI SDK 的 ToolSet。
+   * 执行层 + 截断层：把单个工具包装为 AI SDK 的工具条目。
    * execute 包装不改变工具的返回值语义——
    * 序列化为字符串、截断、加锁，全部对模型透明。
    */
+  private wrapTool(tool: ToolDefinition): Record<string, unknown> {
+    const maxChars = tool.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS
+    const executeFn = tool.execute
+    const isSafe = tool.isConcurrencySafe === true
+
+    return {
+      description: tool.description,
+      inputSchema: jsonSchema(tool.parameters),
+      // biome-ignore lint/suspicious/noExplicitAny: 入参类型由 ToolDefinition.execute 约定，透传即可
+      execute: async (input: any, options: ToolExecuteOptions) => {
+        if (isSafe) {
+          await this.acquireConcurrent()
+        } else {
+          await this.acquireExclusive()
+        }
+        try {
+          const raw = await executeFn(input, options)
+          const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
+          return truncateResult(text, maxChars)
+        } finally {
+          if (isSafe) {
+            this.releaseConcurrent()
+          } else {
+            this.releaseExclusive()
+          }
+        }
+      },
+    }
+  }
+
+  /**
+   * 把当前激活的工具转换为 AI SDK 的 ToolSet（延迟且未发现的工具不进入）。
+   * 产出后记录引用：searchTools 激活新工具时原地写入，
+   * 进行中的 agentLoop（复用同一 ToolSet 对象）后续步骤立即可见。
+   */
   toAISDKFormat(): ToolSet {
     const result: Record<string, unknown> = {}
-    for (const [name, tool] of this.tools) {
-      const maxChars = tool.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS
-      const executeFn = tool.execute
-      const isSafe = tool.isConcurrencySafe === true
-
-      result[name] = {
-        description: tool.description,
-        inputSchema: jsonSchema(tool.parameters),
-        // biome-ignore lint/suspicious/noExplicitAny: 入参类型由 ToolDefinition.execute 约定，透传即可
-        execute: async (input: any, options: ToolExecuteOptions) => {
-          if (isSafe) {
-            await this.acquireConcurrent()
-          } else {
-            await this.acquireExclusive()
-          }
-          try {
-            const raw = await executeFn(input, options)
-            const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
-            return truncateResult(text, maxChars)
-          } finally {
-            if (isSafe) {
-              this.releaseConcurrent()
-            } else {
-              this.releaseExclusive()
-            }
-          }
-        },
-      }
+    for (const tool of this.getActiveTools()) {
+      result[tool.name] = this.wrapTool(tool)
     }
+    this.emittedSet = result
     return result as ToolSet
   }
 }
