@@ -19,4 +19,5 @@
 - Better Auth 报 `Drizzle schema mismatch: Missing tables user, session, account, verification` → Better Auth 使用 Drizzle Adapter 时需要在 schema 中暴露其标准的认证表与关联 → 使用 `@better-auth-cli generate` 生成对应 Drizzle 表结构并合并到 `src/db/schema.ts`。
 - glob 工具能列出工作区外的文件 → fast-glob 对绝对路径模式会忽略 `cwd`（文档化行为），只校验 path 参数拦不住 pattern → glob 工具必须自行校验 pattern（`isAbsolute`、盘符前缀 `C:`、`..` 段），否则工作区守卫被绕过。
 - LLM 触发的 bash 工具执行期间整个 API 无响应 → `execSync` 同步阻塞事件循环，命令跑多久所有请求就挂多久 → 用 `promisify(exec)` 异步执行，并透传 `abortSignal` 让客户端断开时能 kill 命令。
+- Windows 上 tsx watch 重启后偶发遗留 MCP stdio 子进程（npx）→ Windows 无真实 POSIX 信号，强杀/重启时 `SIGINT`/`SIGTERM` 处理器不执行，`client.close()` 清理代码跑不到 → 依赖 MCP server 子进程监听 stdin 断开自动退出；仍遗留时用 `taskkill /F /PID <pid>` 手动清理（与 tsx 遗留进程同源，可用 `Get-Process node,npx` 排查）。
 

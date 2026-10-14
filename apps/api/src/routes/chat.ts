@@ -20,6 +20,7 @@ import {
   readFileTool,
   writeFileTool,
 } from '../tools/filesystem'
+import { getMcpTools } from '../tools/mcp'
 import { pickSearchTool } from '../tools/search'
 import { weatherTool } from '../tools/weather'
 import { startPreviewTool, webFetchTool } from '../tools/web'
@@ -144,6 +145,8 @@ export const chatRoute = new Hono().post(
       bashTool,
       webFetchTool,
       startPreviewTool,
+      // MCP 外部工具（MCP_SERVERS 未配置时为空数组）
+      ...(await getMcpTools()),
     )
     const tools = registry.toAISDKFormat()
     const modelMessages = await convertToModelMessages(messages)

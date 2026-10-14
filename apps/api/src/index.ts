@@ -6,6 +6,7 @@ import { auth } from './auth'
 import { onError } from './lib/api-error'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { usersRoute } from './routes/users'
+import { getMcpTools } from './tools/mcp'
 
 process.loadEnvFile?.()
 
@@ -40,6 +41,8 @@ const routes = app
 const port = Number(process.env.PORT ?? 3000)
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`🚀 API listening on http://localhost:${info.port}`)
+  // MCP 预热：启动时后台连接（不阻塞监听），首个对话请求不再承担 npx 拉起子进程的耗时
+  void getMcpTools()
 })
 
 /**
