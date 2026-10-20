@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { agentLoop, type BudgetState } from '../agent/loop'
 import { anthropic } from '../agent/model'
+import { estimateTokens, microcompact, summarize } from '../context/compressor'
 import {
   coreRules,
   deferredTools,
@@ -179,6 +180,21 @@ export const chatRoute = new Hono().post(
     )
     const modelMessages = await convertToModelMessages(messages)
 
+    // 两层上下文压缩（仅内存，DB 保存完整历史）：
+    // 1) microcompact 清空较早的工具结果；2) token 超阈值时 summarize 用 LLM 摘要最老一段
+    const { messages: compacted, cleared } = microcompact(modelMessages)
+    const { messages: llmMessages, compressedCount } = await summarize(
+      model,
+      compacted,
+      c.req.raw.signal,
+    )
+    if (cleared > 0 || compressedCount > 0) {
+      console.log(
+        `[压缩] 工具结果清空 ${cleared} 个 | 摘要替换 ${compressedCount} 条消息 | ` +
+          `token 估算 ~${estimateTokens(modelMessages)} → ~${estimateTokens(llmMessages)}`,
+      )
+    }
+
     const uiStream = createUIMessageStream({
       onError: (err) => {
         // 真实原因只进服务端日志；err.message 可能泄漏上游细节，不回传前端
@@ -191,7 +207,7 @@ export const chatRoute = new Hono().post(
         // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token；
         // Token 预算限制单次请求的总消耗（所有步骤累计）
         const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
-        await agentLoop(model, tools, modelMessages, system, writer, c.req.raw.signal, budget)
+        await agentLoop(model, tools, llmMessages, system, writer, c.req.raw.signal, budget)
       },
       onEnd: async ({ messages: finalMessages, isAborted }) => {
         // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）

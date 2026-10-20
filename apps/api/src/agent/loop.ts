@@ -1,5 +1,6 @@
 import type { LanguageModel, ModelMessage, ToolSet, UIMessageStreamWriter } from 'ai'
 import { streamText } from 'ai'
+import { microcompact, summarize } from '../context/compressor'
 import { createLoopGuard } from './loop-detection'
 import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
 
@@ -30,6 +31,9 @@ export interface BudgetState {
  *
  * 内置步骤级重试（retry）：429/5xx/网络错误等按指数退避重试（最多 3 次），
  * 400 等不可重试错误直接抛出；已向客户端转发过内容的步骤不重试（避免重复输出）。
+ *
+ * 内置步后压缩（compaction）：每步消息追加后执行 microcompact + summarize，
+ * 防止单次请求内工具结果累积撑爆上下文窗口。
  *
  * @param writer UI 消息流写入器，chunk 实时转发给前端
  * @param abortSignal 客户端断开/取消时中止循环，停止后续 LLM 调用
@@ -238,6 +242,17 @@ export async function agentLoop(
         role: 'user' as const,
         content: `[系统提醒] ${message}。请换一个思路解决问题，不要重复同样的操作。`,
       })
+    }
+
+    // 步后压缩：工具结果随步骤持续累积，防止长工具链撑爆上下文窗口
+    // （budget 计的是累计消耗，拦不住单步上下文超窗的 API 400）。
+    // microcompact 无额外成本；summarize 内部有 token 阈值守卫，低于阈值时为空操作。
+    // 上一次的摘要已作为 user 消息留在 messages 中，再次摘要会自然合并，无需外部状态
+    messages = microcompact(messages).messages
+    const stepCompacted = await summarize(model, messages, abortSignal)
+    messages = stepCompacted.messages
+    if (stepCompacted.compressedCount > 0) {
+      console.log(`  [压缩] 摘要替换 ${stepCompacted.compressedCount} 条消息`)
     }
   }
 
