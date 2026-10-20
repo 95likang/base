@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createLoopGuard } from './loop-guard'
+import { createLoopGuard } from './loop-detection'
 
 /**
  * 通过公开 API（detect/recordCall/recordResult）间接测试，

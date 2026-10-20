@@ -22,15 +22,16 @@ afterAll(async () => {
 
 // 模块级常量在 import 时求值，放到用例内 import 才能拿到上面设置的 env
 async function load() {
-  const mod = await import('./filesystem')
+  const files = await import('./file-tools')
+  const shell = await import('./shell-tools')
   return {
-    readFile: mod.readFileTool,
-    writeFile: mod.writeFileTool,
-    list: mod.listDirectoryTool,
-    edit: mod.editFileTool,
-    glob: mod.globTool,
-    grep: mod.grepTool,
-    bash: mod.bashTool,
+    readFile: files.readFileTool,
+    writeFile: files.writeFileTool,
+    list: files.listDirectoryTool,
+    edit: files.editFileTool,
+    glob: files.globTool,
+    grep: files.grepTool,
+    bash: shell.bashTool,
   }
 }
 
@@ -61,7 +62,7 @@ describe('文件工具冒烟', () => {
     process.env.TOOL_WORKSPACE_GUARD = 'false'
     vi.resetModules()
     try {
-      const mod = await import('./filesystem')
+      const mod = await import('./file-tools')
       // 工作区外放一个文件，关闭守卫后可以越界读
       const outside = path.join(path.dirname(root), `${path.basename(root)}-outside.txt`)
       await fs.writeFile(outside, 'outside content')

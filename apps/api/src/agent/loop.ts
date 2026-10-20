@@ -1,6 +1,6 @@
 import type { LanguageModel, ModelMessage, ToolSet, UIMessageStreamWriter } from 'ai'
 import { streamText } from 'ai'
-import { createLoopGuard } from './loop-guard'
+import { createLoopGuard } from './loop-detection'
 import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
 
 /** 防死循环上限 */

@@ -4,7 +4,7 @@ import { APICallError, tool } from 'ai'
 import { MockLanguageModelV3 } from 'ai/test'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { agentLoop, type BudgetState } from './agent-loop'
+import { agentLoop, type BudgetState } from './loop'
 
 /**
  * 固定 agentLoop 的重试编排行为：

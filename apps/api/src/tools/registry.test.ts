@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type ToolDefinition, ToolRegistry, truncateResult } from './tool-registry'
+import { type ToolDefinition, ToolRegistry, truncateResult } from './registry'
 
 /**
  * 通过 toAISDKFormat() 暴露的 execute 包装间接测试锁与截断，

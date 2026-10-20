@@ -3,7 +3,7 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { ToolDefinition } from '../lib/tool-registry'
+import type { ToolDefinition } from './registry'
 
 /**
  * MCP 工具接入：通过 stdio transport 连接外部 MCP server，

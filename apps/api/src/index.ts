@@ -6,7 +6,7 @@ import { auth } from './auth'
 import { onError } from './lib/api-error'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { usersRoute } from './routes/users'
-import { getMcpTools } from './tools/mcp'
+import { getMcpTools } from './tools'
 
 process.loadEnvFile?.()
 

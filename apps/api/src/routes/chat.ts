@@ -4,26 +4,28 @@ import { convertToModelMessages, createUIMessageStream, createUIMessageStreamRes
 import { desc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { agentLoop, type BudgetState } from '../agent/loop'
+import { anthropic } from '../agent/model'
 import { db } from '../db'
 import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
-import { agentLoop, type BudgetState } from '../lib/agent-loop'
-import { anthropic } from '../lib/ai'
 import { ApiError, validationHook } from '../lib/api-error'
-import { type ToolDefinition, ToolRegistry } from '../lib/tool-registry'
-import { calculatorTool } from '../tools/calculator'
 import {
   bashTool,
+  calculatorTool,
   editFileTool,
+  getMcpTools,
   globTool,
   grepTool,
   listDirectoryTool,
+  pickSearchTool,
   readFileTool,
+  startPreviewTool,
+  type ToolDefinition,
+  ToolRegistry,
+  weatherTool,
+  webFetchTool,
   writeFileTool,
-} from '../tools/filesystem'
-import { getMcpTools } from '../tools/mcp'
-import { pickSearchTool } from '../tools/search'
-import { weatherTool } from '../tools/weather'
-import { startPreviewTool, webFetchTool } from '../tools/web'
+} from '../tools'
 
 /** 系统提示词 */
 const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
