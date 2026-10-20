@@ -1,14 +1,28 @@
 import { zValidator } from '@hono/zod-validator'
 import type { UIMessage } from 'ai'
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from 'ai'
-import { desc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { agentLoop, type BudgetState } from '../agent/loop'
 import { anthropic } from '../agent/model'
-import { db } from '../db'
-import { chat, chatMessage, toUIMessage } from '../db/chat-schema'
-import { ApiError, validationHook } from '../lib/api-error'
+import {
+  coreRules,
+  deferredTools,
+  PromptBuilder,
+  type PromptContext,
+  sessionContext,
+  toolGuide,
+} from '../context/prompt-builder'
+import { validationHook } from '../lib/api-error'
+import {
+  createChat,
+  deleteChat,
+  getChatOrThrow,
+  listChats,
+  listMessages,
+  saveAssistantMessage,
+  saveUserMessage,
+} from '../session/store'
 import {
   bashTool,
   calculatorTool,
@@ -27,10 +41,15 @@ import {
   writeFileTool,
 } from '../tools'
 
-/** 系统提示词 */
-const SYSTEM = 'You are a helpful assistant. 用中文简洁回答。'
 /** 单次请求的 Token 预算上限（所有步骤累计） */
 const TOKEN_BUDGET = 200_000
+
+/** 系统提示管道：模块级单例（build 为纯函数，无请求级状态，可跨请求复用） */
+const promptBuilder = new PromptBuilder()
+  .pipe('core-rules', coreRules())
+  .pipe('tool-guide', toolGuide())
+  .pipe('deferred-tools', deferredTools())
+  .pipe('session-context', sessionContext())
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
 const chatPostSchema = z.object({
@@ -49,7 +68,7 @@ const chatPostSchema = z.object({
 })
 
 /**
- * Chats sub-router — 会话持久化。
+ * Chats sub-router — 会话持久化（CRUD 全部委托 session/store）。
  * GET    /            会话列表
  * POST   /            新建会话
  * DELETE /:id         删除会话（消息级联删除）
@@ -57,33 +76,17 @@ const chatPostSchema = z.object({
  */
 export const chatsRoute = new Hono()
   .get('/', async (c) => {
-    const chats = await db.select().from(chat).orderBy(desc(chat.updatedAt)).limit(50)
-    return c.json({ chats })
+    return c.json({ chats: await listChats() })
   })
   .post('/', async (c) => {
-    const [created] = await db.insert(chat).values({}).returning()
-    return c.json({ chat: created }, 201)
+    return c.json({ chat: await createChat() }, 201)
   })
   .delete('/:id', async (c) => {
-    const id = c.req.param('id')
-    const [deleted] = await db.delete(chat).where(eq(chat.id, id)).returning({ id: chat.id })
-    if (!deleted) {
-      throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
-    }
+    await deleteChat(c.req.param('id'))
     return c.json({ ok: true })
   })
   .get('/:id/messages', async (c) => {
-    const id = c.req.param('id')
-    const [exists] = await db.select({ id: chat.id }).from(chat).where(eq(chat.id, id)).limit(1)
-    if (!exists) {
-      throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
-    }
-    const rows = await db
-      .select()
-      .from(chatMessage)
-      .where(eq(chatMessage.chatId, id))
-      .orderBy(chatMessage.createdAt)
-    return c.json({ messages: rows.map(toUIMessage) })
+    return c.json({ messages: await listMessages(c.req.param('id')) })
   })
 
 /**
@@ -98,35 +101,12 @@ export const chatRoute = new Hono().post(
     const { chatId, messages: rawMessages } = c.req.valid('json')
     const messages = rawMessages as UIMessage[]
 
-    const [target] = await db.select().from(chat).where(eq(chat.id, chatId)).limit(1)
-    if (!target) {
-      throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
-    }
+    const target = await getChatOrThrow(chatId)
 
     // 本次新产生的最后一条用户消息（useChat 每次都发全量历史，只存增量）
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')
     if (lastUser) {
-      const [saved] = await db
-        .select({ id: chatMessage.id })
-        .from(chatMessage)
-        .where(eq(chatMessage.id, lastUser.id))
-        .limit(1)
-      if (!saved) {
-        await db.insert(chatMessage).values({
-          id: lastUser.id,
-          chatId,
-          role: 'user',
-          parts: lastUser.parts,
-        })
-        // 首条消息 → 会话标题
-        const firstText = lastUser.parts.find((p) => p.type === 'text')
-        if (target.title === '新会话' && firstText && 'text' in firstText) {
-          await db
-            .update(chat)
-            .set({ title: firstText.text.slice(0, 30) })
-            .where(eq(chat.id, chatId))
-        }
-      }
+      await saveUserMessage(target, lastUser)
     }
 
     const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
@@ -180,8 +160,15 @@ export const chatRoute = new Hono().post(
     }
     registry.register(toolSearchTool)
     const tools = registry.toAISDKFormat()
-    // 系统提示附带延迟工具目录，模型据此决定是否通过 tool_search 激活
-    const system = SYSTEM + registry.getDeferredToolSummary()
+    // 系统提示经 pipe 管道生成：每个模块按上下文自行决定是否出现
+    const promptCtx: PromptContext = {
+      toolCount: registry.getActiveTools().length,
+      deferredToolSummary: registry.getDeferredToolSummary(),
+      sessionMessageCount: messages.length,
+      sessionId: chatId,
+    }
+    const system = promptBuilder.build(promptCtx)
+    promptBuilder.debug(promptCtx)
     // 工具统计：观测延迟加载对 prompt token 的节省效果
     const allCount = registry.getAll().length
     const activeCount = registry.getActiveTools().length
@@ -212,17 +199,7 @@ export const chatRoute = new Hono().post(
         if (isAborted || !responseMessage || responseMessage.role !== 'assistant') {
           return
         }
-        try {
-          await db.insert(chatMessage).values({
-            id: responseMessage.id || crypto.randomUUID(),
-            chatId,
-            role: 'assistant',
-            parts: responseMessage.parts,
-          })
-        } catch (err) {
-          // 落库失败只记日志，不能让流异常终止（否则前端报 network error）
-          console.error('[chat] persist assistant message failed:', err)
-        }
+        await saveAssistantMessage(chatId, responseMessage)
       },
     })
 
