@@ -1,11 +1,17 @@
 import { zValidator } from '@hono/zod-validator'
 import type { UIMessage } from 'ai'
-import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse } from 'ai'
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { agentLoop, type BudgetState } from '../agent/loop'
 import { anthropic } from '../agent/model'
-import { estimateTokens, microcompact, summarize } from '../context/compressor'
+import { microcompact, summarize } from '../context/compressor'
+import {
+  applyDefense,
+  buildTimestampedMessages,
+  estimateMessageTokens,
+  TokenTracker,
+} from '../context/defense'
 import {
   coreRules,
   deferredTools,
@@ -19,6 +25,7 @@ import {
   createChat,
   deleteChat,
   getChatOrThrow,
+  getMessageCreatedAt,
   listChats,
   listMessages,
   saveAssistantMessage,
@@ -178,22 +185,38 @@ export const chatRoute = new Hono().post(
       `[工具统计] 全部 ${allCount} | 活跃 ${activeCount} | 延迟 ${allCount - activeCount} | ` +
         `Token 估算 ~${estimate.active}（活跃）+ ~${estimate.deferred}（延迟，不占 prompt）`,
     )
-    const modelMessages = await convertToModelMessages(messages)
-
-    // 两层上下文压缩（仅内存，DB 保存完整历史）：
-    // 1) microcompact 清空较早的工具结果；2) token 超阈值时 summarize 用 LLM 摘要最老一段
-    const { messages: compacted, cleared } = microcompact(modelMessages)
+    // 三层即时防线（治理存量历史）→ 两层压缩（microcompact / summarize），全部仅内存：
+    // DB 保存完整历史。时间戳取 DB 行（服务端时钟），逐条转换保证下标对齐。
+    const createdAtById = await getMessageCreatedAt(chatId)
+    const { messages: modelMessages, timestamps } = await buildTimestampedMessages(
+      messages,
+      createdAtById,
+    )
+    const defense = applyDefense(modelMessages, timestamps)
+    const { messages: compacted, cleared } = microcompact(defense.messages)
     const { messages: llmMessages, compressedCount } = await summarize(
       model,
       compacted,
       c.req.raw.signal,
     )
-    if (cleared > 0 || compressedCount > 0) {
+    const defenseTouched =
+      defense.truncated > 0 ||
+      defense.compacted > 0 ||
+      defense.softPruned > 0 ||
+      defense.hardPruned > 0
+    if (defenseTouched || cleared > 0 || compressedCount > 0) {
       console.log(
-        `[压缩] 工具结果清空 ${cleared} 个 | 摘要替换 ${compressedCount} 条消息 | ` +
-          `token 估算 ~${estimateTokens(modelMessages)} → ~${estimateTokens(llmMessages)}`,
+        `[防线] 截断 ${defense.truncated} | 预算清理 ${defense.compacted} | ` +
+          `TTL 软${defense.softPruned}/硬${defense.hardPruned} | ` +
+          `[压缩] 清空 ${cleared} 个 | 摘要 ${compressedCount} 条 | ` +
+          `token ~${estimateMessageTokens(modelMessages)} → ~${estimateMessageTokens(llmMessages)}`,
       )
     }
+
+    // 上下文占用追踪：入口记录最终消息，循环内每步用 API 真实用量锚定。
+    // 与 budget（跨步累计消耗）语义不同：tracker 计的是"当前窗口占用"。
+    const tracker = new TokenTracker()
+    tracker.addMessages(llmMessages)
 
     const uiStream = createUIMessageStream({
       onError: (err) => {
@@ -207,7 +230,16 @@ export const chatRoute = new Hono().post(
         // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token；
         // Token 预算限制单次请求的总消耗（所有步骤累计）
         const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
-        await agentLoop(model, tools, llmMessages, system, writer, c.req.raw.signal, budget)
+        await agentLoop(
+          model,
+          tools,
+          llmMessages,
+          system,
+          writer,
+          c.req.raw.signal,
+          budget,
+          tracker,
+        )
       },
       onEnd: async ({ messages: finalMessages, isAborted }) => {
         // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）

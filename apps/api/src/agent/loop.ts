@@ -1,6 +1,7 @@
 import type { LanguageModel, ModelMessage, ToolSet, UIMessageStreamWriter } from 'ai'
 import { streamText } from 'ai'
 import { microcompact, summarize } from '../context/compressor'
+import type { TokenTracker } from '../context/defense'
 import { createLoopGuard } from './loop-detection'
 import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
 
@@ -38,6 +39,9 @@ export interface BudgetState {
  * @param writer UI 消息流写入器，chunk 实时转发给前端
  * @param abortSignal 客户端断开/取消时中止循环，停止后续 LLM 调用
  * @param budget 可选 Token 预算（调用方持有），耗尽时终止循环
+ * @param tracker 可选上下文占用追踪（调用方持有）：每步用 API 真实 promptTokens
+ *   锚定、消息追加/压缩后增量对账。与 budget 语义不同——budget 计跨步累计消耗，
+ *   tracker 计当前窗口占用（含 system + 工具 schema）。
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -47,6 +51,7 @@ export async function agentLoop(
   writer: UIMessageStreamWriter,
   abortSignal?: AbortSignal,
   budget?: BudgetState,
+  tracker?: TokenTracker,
 ): Promise<void> {
   // 循环检测器：请求级实例，与本次 agentLoop 生命周期一致
   const guard = createLoopGuard()
@@ -182,10 +187,14 @@ export async function agentLoop(
         }
 
         stepMessages = (await result.response).messages
+        // result.usage 为 SDK 拍平后的形状；provider 未上报时为 undefined
+        const usage = await result.usage
         if (budget) {
-          // 累计本步用量（result.usage 为 SDK 拍平后的形状；provider 未上报时为 undefined）
-          const usage = await result.usage
           budget.used += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+        }
+        // 锚定：API 上报的 promptTokens 对应本步发送时的 messages（含 system + 工具 schema）
+        if (tracker && usage.inputTokens != null && usage.inputTokens > 0) {
+          tracker.updateFromAPI(usage.inputTokens)
         }
         break // 本步成功，跳出重试循环
       } catch (error) {
@@ -235,24 +244,35 @@ export async function agentLoop(
 
     // 有工具调用 → 把本步消息追加进上下文，下一轮模型会看到工具执行结果
     messages.push(...stepMessages)
+    tracker?.addMessages(stepMessages)
 
     // warning 提醒注入到工具结果之后，保持消息顺序（user 提醒位于 assistant/tool 之后）
     for (const message of reminders.values()) {
-      messages.push({
-        role: 'user' as const,
+      const reminder: ModelMessage = {
+        role: 'user',
         content: `[系统提醒] ${message}。请换一个思路解决问题，不要重复同样的操作。`,
-      })
+      }
+      messages.push(reminder)
+      tracker?.addMessage(reminder)
     }
 
     // 步后压缩：工具结果随步骤持续累积，防止长工具链撑爆上下文窗口
     // （budget 计的是累计消耗，拦不住单步上下文超窗的 API 400）。
     // microcompact 无额外成本；summarize 内部有 token 阈值守卫，低于阈值时为空操作。
     // 上一次的摘要已作为 user 消息留在 messages 中，再次摘要会自然合并，无需外部状态
+    const beforeCompaction = messages
     messages = microcompact(messages).messages
     const stepCompacted = await summarize(model, messages, abortSignal)
     messages = stepCompacted.messages
+    // 压缩改写了消息数组，tracker 按前后字符差对账
+    tracker?.replaceMessages(beforeCompaction, messages)
     if (stepCompacted.compressedCount > 0) {
       console.log(`  [压缩] 摘要替换 ${stepCompacted.compressedCount} 条消息`)
+    }
+    // summarize（50% 阈值）跑完后占用仍达 75%+：上下文增长快于压缩能力，提示观测
+    if (tracker?.status.needsAction) {
+      const { tokens, percent } = tracker.status
+      console.warn(`  [Token] 上下文占用 ~${tokens} (${percent}%)，压缩后仍然偏高`)
     }
   }
 

@@ -49,6 +49,15 @@ export async function listMessages(id: string): Promise<UIMessage[]> {
   return rows.map(toUIMessage)
 }
 
+/** 某会话全部消息的 id → createdAt（TTL 修剪用服务端时钟判断消息年龄） */
+export async function getMessageCreatedAt(id: string): Promise<Map<string, Date>> {
+  const rows = await db
+    .select({ id: chatMessage.id, createdAt: chatMessage.createdAt })
+    .from(chatMessage)
+    .where(eq(chatMessage.chatId, id))
+  return new Map(rows.map((row) => [row.id, row.createdAt]))
+}
+
 /**
  * 落库本次新产生的用户消息（useChat 每次都发全量历史，只存增量）。
  * 首条消息自动把会话标题更新为其前 30 字符（demo 简化，不额外调 LLM）。
