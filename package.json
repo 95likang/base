@@ -6,6 +6,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "predev": "node scripts/predev.js",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "biome check .",
