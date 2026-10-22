@@ -164,5 +164,6 @@ export function buildMemoryPromptSection(entries: MemoryEntry[]): string {
     sections.push(`# ${labels[type]}\n${lines.join('\n')}`)
   }
   sections.push('需要某条记忆的完整内容时，用 memory 工具的 read 操作按 id 读取。')
+  sections.push('记忆是线索，不是事实——使用前先验证其准确性。')
   return sections.join('\n\n')
 }
