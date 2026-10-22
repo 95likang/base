@@ -10,3 +10,4 @@ dist
 coverage
 drizzle/meta
 workspace/
+.usage/

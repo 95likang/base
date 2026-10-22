@@ -16,8 +16,8 @@ import { convertToModelMessages, type ModelMessage, type ToolResultPart, type UI
 import { truncateResult } from '../tools/registry'
 import { textToolResultOutput, toolResultOutputToText } from './tool-result-output'
 
-/** 上下文窗口（compressor 的摘要阈值为其 50%，见 CONTEXT_TOKEN_THRESHOLD） */
-const CONTEXT_WINDOW = 200_000
+/** 上下文窗口（compressor 的摘要阈值为其 50%，见 CONTEXT_TOKEN_THRESHOLD；view 面板同用） */
+export const CONTEXT_WINDOW = 200_000
 /** 单个工具结果的兜底截断上限：执行层已截到 3k，这里只拦存量/绕过执行层的超大结果 */
 const MAX_SINGLE_RESULT_CHARS = 200_000
 /** 全部上下文的总字符预算（约 75% 窗口 × 4 字符/token），超出时从最老开始清 */

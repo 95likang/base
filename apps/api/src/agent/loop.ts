@@ -2,6 +2,7 @@ import type { LanguageModel, ModelMessage, ToolSet, UIMessageStreamWriter } from
 import { streamText } from 'ai'
 import { microcompact, summarize } from '../context/compressor'
 import type { TokenTracker } from '../context/defense'
+import { normalizeUsage, type UsageTracker } from '../usage/tracker'
 import { createLoopGuard } from './loop-detection'
 import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
 
@@ -42,6 +43,9 @@ export interface BudgetState {
  * @param tracker 可选上下文占用追踪（调用方持有）：每步用 API 真实 promptTokens
  *   锚定、消息追加/压缩后增量对账。与 budget 语义不同——budget 计跨步累计消耗，
  *   tracker 计当前窗口占用（含 system + 工具 schema）。
+ * @param usageTracker 可选成本追踪（调用方持有）：每步用 API 真实 usage
+ *   规范化成四类 token（input / output / cache 读 / cache 写）后按价格表计价累计。
+ * @param chatId 可选会话 id：写入成本记录，供按会话查询用量（/api/usage?chatId=）
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -52,7 +56,11 @@ export async function agentLoop(
   abortSignal?: AbortSignal,
   budget?: BudgetState,
   tracker?: TokenTracker,
+  usageTracker?: UsageTracker,
+  chatId?: string,
 ): Promise<void> {
+  // LanguageModel 联合类型含字符串形式（GlobalProviderModelId），两种都取得到 id
+  const modelId = typeof model === 'string' ? model : model.modelId
   // 循环检测器：请求级实例，与本次 agentLoop 生命周期一致
   const guard = createLoopGuard()
   let steps = 0
@@ -191,6 +199,10 @@ export async function agentLoop(
         const usage = await result.usage
         if (budget) {
           budget.used += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+        }
+        // 成本追踪：四类 token 分别计价（cache 命中折扣各模型不同，见 PRICE_TABLE）
+        if (usageTracker && usage) {
+          usageTracker.record(modelId, normalizeUsage(usage), chatId)
         }
         // 锚定：API 上报的 promptTokens 对应本步发送时的 messages（含 system + 工具 schema）
         if (tracker && usage.inputTokens != null && usage.inputTokens > 0) {

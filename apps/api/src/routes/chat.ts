@@ -48,6 +48,7 @@ import {
   webFetchTool,
   writeFileTool,
 } from '../tools'
+import { usageLog } from './usage'
 
 /** 单次请求的 Token 预算上限（所有步骤累计） */
 const TOKEN_BUDGET = 200_000
@@ -239,7 +240,11 @@ export const chatRoute = new Hono().post(
           c.req.raw.signal,
           budget,
           tracker,
+          usageLog,
+          chatId,
         )
+        // 成本记录在 agentLoop 内按步写入 usageLog；
+        // 展示走 web 面板（/context、/usage 命令 → /api/usage/*）
       },
       onEnd: async ({ messages: finalMessages, isAborted }) => {
         // AI 回复落库（含 reasoning / tool parts，前端以折叠形式展示）
