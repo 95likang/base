@@ -17,4 +17,5 @@ export { ToolRegistry } from './registry'
 
 export { pickSearchTool, startPreviewTool, webFetchTool } from './search-tools'
 export { bashTool } from './shell-tools'
+export { createToolSearchTool } from './tool-search'
 export { calculatorTool, weatherTool } from './utility-tools'

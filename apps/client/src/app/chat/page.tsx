@@ -5,34 +5,23 @@ import { DefaultChatTransport, type UIMessage } from 'ai'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, Suspense, useCallback, useEffect, useState } from 'react'
+import { contextCommand } from './commands/context'
+import {
+  type ChatPanelView,
+  type ContextSnapshot,
+  createDispatcher,
+  type UsageTotals,
+} from './commands/types'
+import { usageCommand } from './commands/usage'
 
 const API = 'http://localhost:3000'
 
 type ChatSummary = { id: string; title: string; updatedAt: string }
 
-type ContextSection = { name: string; tokens: number }
-type ContextSnapshot = {
-  modelId: string
-  windowTokens: number
-  sections: ContextSection[]
-  usedTokens: number
-  freeTokens: number
-  usedPercent: number
-}
-
-type UsageTotals = {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  cost: number
-  hitRate: number
-  baselineCost: number
-  savedCost: number
-  steps: number
-}
-
 const fmt = (n: number) => n.toLocaleString('en-US')
+
+/** 斜杠命令 dispatcher：模块级组装一次，命令只依赖传入的 CommandContext */
+const dispatch = createDispatcher([contextCommand, usageCommand])
 
 /** LLM 流式对话 demo：会话列表 + 历史持久化（存 PG），直接请求 Hono API。 */
 export default function ChatPage() {
@@ -171,36 +160,15 @@ function ChatPanel({
     onFinish: onFinished,
   })
   const [input, setInput] = useState('')
-  // /context、/usage 命令的面板数据（本地展示，不入消息流、不落库）
-  const [contextView, setContextView] = useState<ContextSnapshot | null>(null)
-  const [usageView, setUsageView] = useState<{ totals: UsageTotals; title: string } | null>(null)
+  // 斜杠命令的面板数据（本地展示，不入消息流、不落库）
+  const [panel, setPanel] = useState<ChatPanelView | null>(null)
 
-  const onSubmit = (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     const cmd = input.trim()
     if (!cmd || status !== 'ready') return
-    if (cmd === '/context') {
-      fetch(`${API}/api/usage/context${chatId ? `?chatId=${chatId}` : ''}`)
-        .then((res) => res.json())
-        .then(setContextView)
-      setInput('')
-      return
-    }
-    if (cmd === '/usage') {
-      // 默认查当前会话；/usage all 查进程累计
-      const query = chatId ? `?chatId=${chatId}` : ''
-      fetch(`${API}/api/usage${query}`)
-        .then((res) => res.json())
-        .then((data) =>
-          setUsageView({ totals: data.totals, title: chatId ? '当前会话' : '进程累计' }),
-        )
-      setInput('')
-      return
-    }
-    if (cmd === '/usage all') {
-      fetch(`${API}/api/usage`)
-        .then((res) => res.json())
-        .then((data) => setUsageView({ totals: data.totals, title: '进程累计' }))
+    const handled = await dispatch(cmd, { chatId, showPanel: setPanel })
+    if (handled) {
       setInput('')
       return
     }
@@ -215,15 +183,11 @@ function ChatPanel({
       <h1 className="text-xl font-bold">AI Chat Demo</h1>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-        {contextView && (
-          <ContextPanel snapshot={contextView} onClose={() => setContextView(null)} />
+        {panel?.kind === 'context' && (
+          <ContextPanel snapshot={panel.snapshot} onClose={() => setPanel(null)} />
         )}
-        {usageView && (
-          <UsagePanel
-            totals={usageView.totals}
-            title={usageView.title}
-            onClose={() => setUsageView(null)}
-          />
+        {panel?.kind === 'usage' && (
+          <UsagePanel totals={panel.totals} title={panel.title} onClose={() => setPanel(null)} />
         )}
         {messages.map((message) => {
           const reasoning = message.parts
