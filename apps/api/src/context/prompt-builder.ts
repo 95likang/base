@@ -16,6 +16,8 @@ export interface PromptContext {
   sessionId: string
   /** 未过期的持久记忆（请求级加载，注入索引供 LLM 引用） */
   memories: MemoryEntry[]
+  /** 当前 embedding 模型下已索引的知识库规模（空库时 size 为 0） */
+  knowledgeBase: { size: number; sources: string[] }
 }
 
 type PipeFn = (ctx: PromptContext) => string | null
@@ -95,5 +97,20 @@ export function memoryContext(): PipeFn {
   return (ctx) => {
     // 索引内容为空时 store 也会返回引导语，这里只处理"未提供"的情况
     return buildMemoryPromptSection(ctx.memories)
+  }
+}
+
+/**
+ * 知识库状态注入：库为空时不出现；非空时告知模型有资料可检索，
+ * 引导其先 rag_search 再回答（避免凭空作答）。
+ */
+export function ragContext(): PipeFn {
+  return (ctx) => {
+    const { size, sources } = ctx.knowledgeBase
+    if (size === 0) return null
+
+    const shown = sources.slice(0, 10).join(', ')
+    const suffix = sources.length > 10 ? ` 等 ${sources.length} 个来源` : ''
+    return `[知识库] 已导入 ${size} 个文档片段（来源: ${shown}${suffix}）。需要查资料时用 rag_search 工具检索后再回答。`
   }
 }

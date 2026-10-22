@@ -16,6 +16,7 @@ function makeCtx(overrides: Partial<PromptContext> = {}): PromptContext {
     sessionMessageCount: 0,
     sessionId: 'chat-1',
     memories: [],
+    knowledgeBase: { size: 0, sources: [] },
     ...overrides,
   }
 }

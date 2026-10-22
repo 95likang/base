@@ -18,11 +18,13 @@ import {
   memoryContext,
   PromptBuilder,
   type PromptContext,
+  ragContext,
   sessionContext,
   toolGuide,
 } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
 import { listActiveMemories } from '../memory/store'
+import { ragEmbedder, ragStore } from '../rag/service'
 import {
   createChat,
   deleteChat,
@@ -37,6 +39,7 @@ import {
   bashTool,
   calculatorTool,
   createMemoryTool,
+  createRagTools,
   createToolSearchTool,
   editFileTool,
   getMcpTools,
@@ -62,6 +65,7 @@ const promptBuilder = new PromptBuilder()
   .pipe('tool-guide', toolGuide())
   .pipe('deferred-tools', deferredTools())
   .pipe('memory-context', memoryContext())
+  .pipe('rag-context', ragContext())
   .pipe('session-context', sessionContext())
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
@@ -147,16 +151,21 @@ export const chatRoute = new Hono().post(
     registry.register(createToolSearchTool(registry))
     // 记忆工具：LLM 在对话中自主触发保存/读取（写库，独占锁）
     registry.register(createMemoryTool())
+    // 知识库工具：导入工作区文档 + 混合检索（与管理页共用同一 store）
+    registry.register(...createRagTools(ragStore, ragEmbedder))
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）
     const memories = await listActiveMemories()
+    // 知识库状态同样请求级读取：索引懒加载后取规模与来源，空库时不注入该段
+    await ragStore.ensureLoaded()
     const promptCtx: PromptContext = {
       toolCount: registry.getActiveTools().length,
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: messages.length,
       sessionId: chatId,
       memories,
+      knowledgeBase: { size: ragStore.size(), sources: ragStore.sources() },
     }
     const system = promptBuilder.build(promptCtx)
     promptBuilder.debug(promptCtx)

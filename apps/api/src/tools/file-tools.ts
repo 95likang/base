@@ -10,18 +10,23 @@ export const WORKSPACE_ROOT = resolvePath(
 
 /**
  * 工作区守卫开关：TOOL_WORKSPACE_GUARD=false 时关闭越界检查，
- * resolve() 退化为普通路径解析（相对 WORKSPACE_ROOT，绝对路径直接放行）。
+ * resolveWorkspacePath() 退化为普通路径解析（相对 WORKSPACE_ROOT，绝对路径直接放行）。
  * 默认开启；关闭后模型可访问服务器任意路径，仅限本地开发使用。
  */
 const GUARD_ENABLED = process.env.TOOL_WORKSPACE_GUARD !== 'false'
 
 /** 解析为工作区内的绝对路径；越界（../、绝对路径、其他盘符）直接抛错 */
-function resolve(userPath: string): string {
+export function resolveWorkspacePath(userPath: string): string {
   const abs = resolvePath(WORKSPACE_ROOT, userPath)
   if (GUARD_ENABLED && abs !== WORKSPACE_ROOT && !abs.startsWith(WORKSPACE_ROOT + sep)) {
     throw new Error('路径越界：只能访问工作区内的相对路径')
   }
   return abs
+}
+
+/** 绝对路径转工作区相对路径（统一用 / 分隔，用作文档 source） */
+export function workspaceRelativePath(absPath: string): string {
+  return relative(WORKSPACE_ROOT, absPath).split(sep).join('/')
 }
 
 export const readFileTool: ToolDefinition = {
@@ -39,7 +44,7 @@ export const readFileTool: ToolDefinition = {
   isReadOnly: true,
   maxResultChars: 500, // 演示用，生产环境通常 50000+
   execute: async ({ path }: { path: string }) => {
-    return readFileSync(resolve(path), 'utf-8')
+    return readFileSync(resolveWorkspacePath(path), 'utf-8')
   },
 }
 
@@ -58,7 +63,7 @@ export const writeFileTool: ToolDefinition = {
   isConcurrencySafe: false, // 写操作不能并行
   isReadOnly: false,
   execute: async ({ path, content }: { path: string; content: string }) => {
-    writeFileSync(resolve(path), content, 'utf-8')
+    writeFileSync(resolveWorkspacePath(path), content, 'utf-8')
     return `已写入 ${content.length} 字符到 ${path}`
   },
 }
@@ -77,7 +82,7 @@ export const listDirectoryTool: ToolDefinition = {
   isConcurrencySafe: true,
   isReadOnly: true,
   execute: async ({ path = '.' }: { path?: string }) => {
-    const resolved = resolve(path)
+    const resolved = resolveWorkspacePath(path)
     return readdirSync(resolved)
       .map((name) => {
         const stat = statSync(join(resolved, name))
@@ -112,7 +117,7 @@ export const editFileTool: ToolDefinition = {
     old_string: string
     new_string: string
   }) => {
-    const resolved = resolve(path)
+    const resolved = resolveWorkspacePath(path)
     if (!existsSync(resolved)) return `文件不存在: ${path}`
 
     const content = readFileSync(resolved, 'utf-8')
@@ -156,7 +161,7 @@ export const globTool: ToolDefinition = {
       return `非法 pattern：只允许工作区内的相对模式（不允许绝对路径或 ".."）`
     }
     const results = await fg(pattern, {
-      cwd: resolve(path),
+      cwd: resolveWorkspacePath(path),
       ignore: ['node_modules/**', '.git/**'],
       dot: false,
       onlyFiles: true,
@@ -183,7 +188,7 @@ export const grepTool: ToolDefinition = {
   isReadOnly: true,
   maxResultChars: 3000,
   execute: async ({ pattern, path = '.' }: { pattern: string; path?: string }) => {
-    const baseDir = resolve(path)
+    const baseDir = resolveWorkspacePath(path)
     const regex = new RegExp(pattern, 'i')
     const matches: string[] = []
     const SKIP = new Set(['node_modules', '.git', 'dist'])

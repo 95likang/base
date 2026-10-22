@@ -2,6 +2,7 @@ export * from './auth-schema'
 export { user as users } from './auth-schema'
 export * from './chat-schema'
 export * from './memory-schema'
+export * from './rag-schema'
 
 import type { user } from './auth-schema'
 

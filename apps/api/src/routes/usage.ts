@@ -7,11 +7,13 @@ import {
   coreRules,
   deferredTools,
   PromptBuilder,
+  ragContext,
   sessionContext,
   toolGuide,
 } from '../context/prompt-builder'
 import { buildContextSnapshot } from '../context/view'
 import { buildMemoryPromptSection, listActiveMemories } from '../memory/store'
+import { ragStore } from '../rag/service'
 import { getMessageCreatedAt, listMessages } from '../session/store'
 import {
   bashTool,
@@ -77,6 +79,7 @@ export const usageRoute = new Hono()
       startPreviewTool,
     )
     const memories = await listActiveMemories()
+    await ragStore.ensureLoaded()
     // 只构建一次 memory 段：pipe 与 memoryChars 共用（build 内部会再次调用各 pipe）
     const memorySection = buildMemoryPromptSection(memories)
     const promptBuilder = new PromptBuilder()
@@ -84,6 +87,7 @@ export const usageRoute = new Hono()
       .pipe('tool-guide', toolGuide())
       .pipe('deferred-tools', deferredTools())
       .pipe('memory-context', () => memorySection)
+      .pipe('rag-context', ragContext())
       .pipe('session-context', sessionContext())
     const system = promptBuilder.build({
       toolCount: registry.getActiveTools().length,
@@ -91,6 +95,7 @@ export const usageRoute = new Hono()
       sessionMessageCount: modelMessages.length,
       sessionId: chatId ?? 'new',
       memories,
+      knowledgeBase: { size: ragStore.size(), sources: ragStore.sources() },
     })
 
     const modelId = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'
