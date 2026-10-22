@@ -6,11 +6,12 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, Suspense, useCallback, useEffect, useState } from 'react'
 import { contextCommand } from './commands/context'
-import { memoryCommand } from './commands/memory'
+import { dreamCommand, lintCommand, memoryCommand } from './commands/memory'
 import {
   type ChatPanelView,
   type ContextSnapshot,
   createDispatcher,
+  type LintReport,
   type MemoryItem,
   type UsageTotals,
 } from './commands/types'
@@ -23,7 +24,31 @@ type ChatSummary = { id: string; title: string; updatedAt: string }
 const fmt = (n: number) => n.toLocaleString('en-US')
 
 /** 斜杠命令 dispatcher：模块级组装一次，命令只依赖传入的 CommandContext */
-const dispatch = createDispatcher([contextCommand, usageCommand, memoryCommand])
+const dispatch = createDispatcher([
+  contextCommand,
+  usageCommand,
+  memoryCommand,
+  lintCommand,
+  dreamCommand,
+])
+
+/**
+ * 建会话的模块级缓存：空会话页自动建会话时，StrictMode 会把 effect 跑两遍，
+ * 复用同一个 in-flight Promise，避免重复插入两条空会话。
+ */
+let creatingChat: Promise<string> | null = null
+
+function createChatOnce(): Promise<string> {
+  if (!creatingChat) {
+    creatingChat = fetch(`${API}/api/chats`, { method: 'POST' })
+      .then((res) => res.json())
+      .then(({ chat }) => chat.id as string)
+      .finally(() => {
+        creatingChat = null
+      })
+  }
+  return creatingChat
+}
 
 /** LLM 流式对话 demo：会话列表 + 历史持久化（存 PG），直接请求 Hono API。 */
 export default function ChatPage() {
@@ -40,6 +65,7 @@ function ChatPageInner() {
   const chatId = searchParams.get('id')
 
   const [chats, setChats] = useState<ChatSummary[]>([])
+  const [createError, setCreateError] = useState(false)
   // 记录"哪个会话的历史已加载"。useChat 的 messages 只在首次挂载生效，
   // 必须等新会话的历史就绪后才渲染 ChatPanel，否则会带着上一个会话的消息重挂载。
   const [history, setHistory] = useState<{
@@ -60,6 +86,24 @@ function ChatPageInner() {
   useEffect(() => {
     refreshChats()
   }, [refreshChats])
+
+  // 无 id 时先建会话再跳转：Chat API 要求 chatId，否则发消息直接 400
+  useEffect(() => {
+    if (chatId) return
+    let cancelled = false
+    createChatOnce()
+      .then((id) => {
+        if (cancelled) return
+        refreshChats()
+        router.replace(`/chat?id=${id}`)
+      })
+      .catch(() => {
+        if (!cancelled) setCreateError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [chatId, refreshChats, router])
 
   // 切换会话时拉历史（无 id 则重置为空会话）
   useEffect(() => {
@@ -92,6 +136,15 @@ function ChatPageInner() {
     if (id === chatId) {
       router.push('/chat')
     }
+  }
+
+  // 没有 chatId 时不渲染输入框，否则发送会带 chatId=null 被后端拒绝
+  if (!chatId) {
+    return (
+      <main className="p-8">
+        {createError ? '创建会话失败，请刷新页面重试。' : '正在创建会话…'}
+      </main>
+    )
   }
 
   // 历史还没加载完前不渲染 ChatPanel（useChat 的 messages 只在首挂载生效）
@@ -172,7 +225,11 @@ function ChatPanel({
     e.preventDefault()
     const cmd = input.trim()
     if (!cmd || status !== 'ready') return
-    const handled = await dispatch(cmd, { chatId, showPanel: setPanel })
+    const handled = await dispatch(cmd, {
+      chatId,
+      showPanel: setPanel,
+      send: (text) => void sendMessage({ text }),
+    })
     if (handled) {
       setInput('')
       return
@@ -196,6 +253,9 @@ function ChatPanel({
         )}
         {panel?.kind === 'memory' && (
           <MemoryPanel items={panel.items} onClose={() => setPanel(null)} />
+        )}
+        {panel?.kind === 'lint' && (
+          <LintPanel total={panel.total} reports={panel.reports} onClose={() => setPanel(null)} />
         )}
         {messages.map((message) => {
           const reasoning = message.parts
@@ -242,7 +302,7 @@ function ChatPanel({
         <form onSubmit={onSubmit} className="flex gap-2">
           <input
             className="flex-1 rounded border border-gray-300 px-3 py-2"
-            placeholder="说点什么…（/context 上下文 · /usage 成本 · /memory 记忆）"
+            placeholder="说点什么…（/context 上下文 · /usage 成本 · /memory 记忆 · /lint 体检 · /dream 整理）"
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
@@ -444,6 +504,55 @@ function MemoryPanel({ items, onClose }: { items: MemoryItem[]; onClose: () => v
               </div>
             </div>
           ))}
+      </div>
+    </div>
+  )
+}
+
+/** 记忆体检面板：输入 /lint 时展示，列出每条记忆的失效路径、长期未读、同名重复 */
+function LintPanel({
+  total,
+  reports,
+  onClose,
+}: {
+  total: number
+  reports: LintReport[]
+  onClose: () => void
+}) {
+  return (
+    <div className="rounded-lg border bg-white p-4 text-sm shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="font-medium">
+          记忆体检 · 共 {total} 条
+          {reports.length > 0 ? ` · ${reports.length} 条有警告` : ' · 未发现问题'}
+        </p>
+        <button
+          type="button"
+          aria-label="关闭面板"
+          onClick={onClose}
+          className="text-gray-400 hover:text-gray-700"
+        >
+          ×
+        </button>
+      </div>
+      {reports.length === 0 && (
+        <p className="text-xs text-gray-500">
+          记忆库健康。体检项：引用路径是否还存在、是否已过期、是否长期未被读取、是否有同名重复。
+        </p>
+      )}
+      <div className="flex flex-col gap-2">
+        {reports.map((report) => (
+          <div key={report.entry.id} className="rounded bg-amber-50 px-2 py-1.5 text-xs">
+            <p className="font-medium">
+              [{report.entry.type}] {report.entry.name}
+            </p>
+            {report.issues.map((issue) => (
+              <p key={`${issue.kind}:${issue.message}`} className="text-gray-600">
+                · {issue.kind}：{issue.message}
+              </p>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   )

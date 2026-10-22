@@ -36,16 +36,24 @@ export type MemoryItem = {
   expiresAt: string | null
 }
 
+/** 记忆体检报告的单项问题 */
+export type LintReport = {
+  entry: MemoryItem
+  issues: { kind: string; message: string }[]
+}
+
 /** 命令产生的面板视图（联合类型，page 按 kind 分发渲染） */
 export type ChatPanelView =
   | { kind: 'context'; snapshot: ContextSnapshot }
   | { kind: 'usage'; totals: UsageTotals; title: string }
   | { kind: 'memory'; items: MemoryItem[] }
+  | { kind: 'lint'; total: number; reports: LintReport[] }
 
-/** 命令可用的依赖：当前会话 + 面板展示回调 */
+/** 命令可用的依赖：当前会话 + 面板展示回调 + 往消息流里发一条用户消息（如 /dream） */
 export interface CommandContext {
   chatId: string | null
   showPanel: (view: ChatPanelView) => void
+  send: (text: string) => void
 }
 
 /**

@@ -1,6 +1,7 @@
 import {
   deleteMemory,
   getMemory,
+  lintMemories,
   listActiveMemories,
   type MemoryType,
   saveMemory,
@@ -9,7 +10,7 @@ import {
 import type { ToolDefinition } from './registry'
 
 /**
- * 记忆管理工具：save / list / search / read / delete 五个 action。
+ * 记忆管理工具：save / list / search / read / delete / lint 六个 action。
  * 触发规则（四类型的"什么时候该存"）全部写进 description——
  * LLM 区分记忆类型完全靠这里引导。
  */
@@ -30,14 +31,15 @@ export function createMemoryTool(): ToolDefinition {
       '不该存的：一次性的任务细节、代码片段本身、可从文件/工具直接获得的信息。',
       '同名记忆会覆盖更新——发现已有记忆过时或表述需修订时，用相同 name 重新 save。',
       '系统提示里已有全部记忆的索引（[id] name — description），read 前先看索引。',
+      'lint 会对记忆库做体检（引用路径失效、长期未读、同名重复）；发现过时记忆时先 lint 再决定 delete 或重存。',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['save', 'list', 'search', 'read', 'delete'],
-          description: 'save 保存 | list 列表 | search 搜索 | read 读取 | delete 删除',
+          enum: ['save', 'list', 'search', 'read', 'delete', 'lint'],
+          description: 'save 保存 | list 列表 | search 搜索 | read 读取 | delete 删除 | lint 体检',
         },
         type: {
           type: 'string',
@@ -118,6 +120,17 @@ export function createMemoryTool(): ToolDefinition {
         case 'delete': {
           if (!args.id) return '删除失败：需要 id 参数'
           return (await deleteMemory(args.id)) ? `已删除记忆: ${args.id}` : `记忆不存在: ${args.id}`
+        }
+        case 'lint': {
+          const { total, reports } = await lintMemories()
+          if (reports.length === 0) return `记忆体检：共 ${total} 条，未发现问题。`
+          const details = reports.map(
+            (r) =>
+              `  [${r.entry.id}] (${r.entry.type}) ${r.entry.name}\n${r.issues
+                .map((i) => `     • ${i.kind}: ${i.message}`)
+                .join('\n')}`,
+          )
+          return `记忆体检：共 ${total} 条，${reports.length} 条有警告\n${details.join('\n')}`
         }
         default:
           return `未知操作: ${args.action}`

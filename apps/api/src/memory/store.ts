@@ -1,6 +1,10 @@
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../db'
 import { type MemoryRow, memory } from '../db/memory-schema'
+import { WORKSPACE_ROOT } from '../tools/file-tools'
+import { lintAll, type ValidationReport } from './validator'
 
 /**
  * 记忆持久化：memory 表的数据访问函数。
@@ -17,12 +21,33 @@ export interface MemoryEntry {
   description: string
   content: string
   expiresAt: Date | null
+  /** 最近一次被 read 的时间；null = 从未读过 */
+  lastReadAt: Date | null
+  updatedAt: Date
 }
 
 /** 索引行数上限：超过后不再注入新条目（保留最新 N 条），迫使只存真正重要的信息 */
 const MAX_PROMPT_ENTRIES = 200
 /** 单条 content 注入/读取时的字符上限，超出截断，防止一条记忆吃光上下文预算 */
 const MAX_CONTENT_CHARS = 4000
+/** lastReadAt 的刷新间隔：TTL 按天判断，没必要每次 read 都写库 */
+const TOUCH_INTERVAL_MS = 60 * 60 * 1000
+
+/** 从 cwd 向上找 pnpm-workspace.yaml，得到仓库根；找不到则返回 null */
+function findRepoRoot(start: string): string | null {
+  let dir = start
+  while (true) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+/** 记忆里相对路径的候选解析根：工作区 → 进程 cwd → 仓库根 */
+const LINT_BASE_DIRS = [WORKSPACE_ROOT, process.cwd(), findRepoRoot(process.cwd())].filter(
+  (dir): dir is string => dir !== null,
+)
 
 function toEntry(row: MemoryRow): MemoryEntry {
   return {
@@ -35,6 +60,8 @@ function toEntry(row: MemoryRow): MemoryEntry {
         ? `${row.content.slice(0, MAX_CONTENT_CHARS)}\n...(已截断)`
         : row.content,
     expiresAt: row.expiresAt,
+    lastReadAt: row.lastReadAt,
+    updatedAt: row.updatedAt,
   }
 }
 
@@ -58,14 +85,28 @@ export async function listAllMemories(): Promise<MemoryEntry[]> {
   return rows.map(toEntry)
 }
 
-/** 按 id 读取单条（未过期才返回） */
+/** 按 id 读取单条（未过期才返回），并刷新 lastReadAt 供 lint 的 TTL 判断 */
 export async function getMemory(id: string): Promise<MemoryEntry | null> {
   const [row] = await db
     .select()
     .from(memory)
     .where(and(eq(memory.id, id), notExpired))
     .limit(1)
-  return row ? toEntry(row) : null
+  if (!row) return null
+  // 用原生 SQL 只改 last_read_at：走 .set() 会触发 updatedAt 的 $onUpdate，污染排序与 TTL 兜底
+  if (!row.lastReadAt || Date.now() - row.lastReadAt.getTime() > TOUCH_INTERVAL_MS) {
+    await db.execute(sql`update ${memory} set last_read_at = now() where id = ${row.id}`)
+  }
+  return toEntry(row)
+}
+
+/** 全库体检：路由与工具共用的统一入口（数据加载 + 校验） */
+export async function lintMemories(): Promise<{
+  total: number
+  reports: ValidationReport[]
+}> {
+  const entries = await listAllMemories()
+  return { total: entries.length, reports: lintAll(entries, LINT_BASE_DIRS) }
 }
 
 /** 关键词搜索（name/description/content 子串匹配，大小写不敏感，未过期） */

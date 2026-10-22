@@ -18,6 +18,8 @@ export const memory = pgTable('memory', {
   content: text('content').notNull(),
   /** 仅 project 类型使用；NULL = 永久 */
   expiresAt: timestamp('expires_at'),
+  /** 最近一次被 memory read 读取的时间；NULL = 从未读过（lint 的 TTL 判断用 updatedAt 兜底） */
+  lastReadAt: timestamp('last_read_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
