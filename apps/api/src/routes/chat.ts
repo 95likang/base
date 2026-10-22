@@ -15,12 +15,14 @@ import {
 import {
   coreRules,
   deferredTools,
+  memoryContext,
   PromptBuilder,
   type PromptContext,
   sessionContext,
   toolGuide,
 } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
+import { listActiveMemories } from '../memory/store'
 import {
   createChat,
   deleteChat,
@@ -34,6 +36,7 @@ import {
 import {
   bashTool,
   calculatorTool,
+  createMemoryTool,
   createToolSearchTool,
   editFileTool,
   getMcpTools,
@@ -58,6 +61,7 @@ const promptBuilder = new PromptBuilder()
   .pipe('core-rules', coreRules())
   .pipe('tool-guide', toolGuide())
   .pipe('deferred-tools', deferredTools())
+  .pipe('memory-context', memoryContext())
   .pipe('session-context', sessionContext())
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
@@ -141,13 +145,18 @@ export const chatRoute = new Hono().post(
     )
     // 延迟工具的发现入口：激活后 registry 原地更新 ToolSet，后续步骤立即可用
     registry.register(createToolSearchTool(registry))
+    // 记忆工具：LLM 在对话中自主触发保存/读取（写库，独占锁）
+    registry.register(createMemoryTool())
     const tools = registry.toAISDKFormat()
-    // 系统提示经 pipe 管道生成：每个模块按上下文自行决定是否出现
+    // 请求级加载未过期记忆：注入 system prompt 索引。
+    // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）
+    const memories = await listActiveMemories()
     const promptCtx: PromptContext = {
       toolCount: registry.getActiveTools().length,
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: messages.length,
       sessionId: chatId,
+      memories,
     }
     const system = promptBuilder.build(promptCtx)
     promptBuilder.debug(promptCtx)

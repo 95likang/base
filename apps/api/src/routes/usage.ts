@@ -11,6 +11,7 @@ import {
   toolGuide,
 } from '../context/prompt-builder'
 import { buildContextSnapshot } from '../context/view'
+import { buildMemoryPromptSection, listActiveMemories } from '../memory/store'
 import { getMessageCreatedAt, listMessages } from '../session/store'
 import {
   bashTool,
@@ -75,16 +76,21 @@ export const usageRoute = new Hono()
       webFetchTool,
       startPreviewTool,
     )
+    const memories = await listActiveMemories()
+    // 只构建一次 memory 段：pipe 与 memoryChars 共用（build 内部会再次调用各 pipe）
+    const memorySection = buildMemoryPromptSection(memories)
     const promptBuilder = new PromptBuilder()
       .pipe('core-rules', coreRules())
       .pipe('tool-guide', toolGuide())
       .pipe('deferred-tools', deferredTools())
+      .pipe('memory-context', () => memorySection)
       .pipe('session-context', sessionContext())
     const system = promptBuilder.build({
       toolCount: registry.getActiveTools().length,
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: modelMessages.length,
       sessionId: chatId ?? 'new',
+      memories,
     })
 
     const modelId = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'
@@ -98,7 +104,7 @@ export const usageRoute = new Hono()
           (a, t) => a + t.name.length + t.description.length + JSON.stringify(t.parameters).length,
           0,
         ),
-      memoryChars: 0,
+      memoryChars: memorySection.length,
       skillsChars: 0,
       messages: modelMessages,
     })

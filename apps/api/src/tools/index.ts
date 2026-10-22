@@ -12,6 +12,7 @@ export {
   writeFileTool,
 } from './file-tools'
 export { getMcpTools } from './mcp-client'
+export { createMemoryTool } from './memory-tools'
 export type { ToolDefinition } from './registry'
 export { ToolRegistry } from './registry'
 

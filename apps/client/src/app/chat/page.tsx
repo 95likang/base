@@ -6,10 +6,12 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, Suspense, useCallback, useEffect, useState } from 'react'
 import { contextCommand } from './commands/context'
+import { memoryCommand } from './commands/memory'
 import {
   type ChatPanelView,
   type ContextSnapshot,
   createDispatcher,
+  type MemoryItem,
   type UsageTotals,
 } from './commands/types'
 import { usageCommand } from './commands/usage'
@@ -21,7 +23,7 @@ type ChatSummary = { id: string; title: string; updatedAt: string }
 const fmt = (n: number) => n.toLocaleString('en-US')
 
 /** 斜杠命令 dispatcher：模块级组装一次，命令只依赖传入的 CommandContext */
-const dispatch = createDispatcher([contextCommand, usageCommand])
+const dispatch = createDispatcher([contextCommand, usageCommand, memoryCommand])
 
 /** LLM 流式对话 demo：会话列表 + 历史持久化（存 PG），直接请求 Hono API。 */
 export default function ChatPage() {
@@ -40,7 +42,10 @@ function ChatPageInner() {
   const [chats, setChats] = useState<ChatSummary[]>([])
   // 记录"哪个会话的历史已加载"。useChat 的 messages 只在首次挂载生效，
   // 必须等新会话的历史就绪后才渲染 ChatPanel，否则会带着上一个会话的消息重挂载。
-  const [history, setHistory] = useState<{ chatId: string | null; messages: UIMessage[] }>({
+  const [history, setHistory] = useState<{
+    chatId: string | null
+    messages: UIMessage[]
+  }>({
     chatId: null,
     messages: [],
   })
@@ -189,6 +194,9 @@ function ChatPanel({
         {panel?.kind === 'usage' && (
           <UsagePanel totals={panel.totals} title={panel.title} onClose={() => setPanel(null)} />
         )}
+        {panel?.kind === 'memory' && (
+          <MemoryPanel items={panel.items} onClose={() => setPanel(null)} />
+        )}
         {messages.map((message) => {
           const reasoning = message.parts
             .filter((part) => part.type === 'reasoning')
@@ -234,7 +242,7 @@ function ChatPanel({
         <form onSubmit={onSubmit} className="flex gap-2">
           <input
             className="flex-1 rounded border border-gray-300 px-3 py-2"
-            placeholder="说点什么…（/context 上下文 · /usage 本会话成本 · /usage all 累计）"
+            placeholder="说点什么…（/context 上下文 · /usage 成本 · /memory 记忆）"
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
@@ -355,6 +363,87 @@ function UsagePanel({
         {' · '}无 cache 假想 ${totals.baselineCost.toFixed(4)}
         {' · '}省 <span className="font-medium text-gray-900">${totals.savedCost.toFixed(4)}</span>
         {savedPct > 0 ? ` (-${savedPct}%)` : ''}
+      </div>
+    </div>
+  )
+}
+
+/** 记忆管理面板：输入 /memory 时展示，按四类分组，支持删除 */
+function MemoryPanel({ items, onClose }: { items: MemoryItem[]; onClose: () => void }) {
+  const [list, setList] = useState(items)
+
+  const remove = async (id: string) => {
+    await fetch(`${API}/api/memory/${id}`, { method: 'DELETE' })
+    setList((prev) => prev.filter((m) => m.id !== id))
+  }
+
+  const labels: Record<MemoryItem['type'], string> = {
+    user: '用户画像',
+    feedback: '行为反馈',
+    project: '项目动态',
+    reference: '外部资源',
+  }
+  const groups = (['user', 'feedback', 'project', 'reference'] as const).map((type) => ({
+    type,
+    entries: list.filter((m) => m.type === type),
+  }))
+
+  return (
+    <div className="rounded-lg border bg-white p-4 text-sm shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="font-medium">Memory · 共 {list.length} 条</p>
+        <button
+          type="button"
+          aria-label="关闭面板"
+          onClick={onClose}
+          className="text-gray-400 hover:text-gray-700"
+        >
+          ×
+        </button>
+      </div>
+      {list.length === 0 && (
+        <p className="text-xs text-gray-500">
+          还没有任何记忆。对话中透露偏好/决策/渠道时，AI 会自动保存。
+        </p>
+      )}
+      <div className="flex flex-col gap-3">
+        {groups
+          .filter((g) => g.entries.length > 0)
+          .map((group) => (
+            <div key={group.type}>
+              <p className="mb-1 text-xs font-medium text-gray-500">{labels[group.type]}</p>
+              <div className="flex flex-col gap-1.5">
+                {group.entries.map((m) => {
+                  const expired = m.expiresAt !== null && new Date(m.expiresAt) < new Date()
+                  return (
+                    <div
+                      key={m.id}
+                      className="group flex items-start gap-2 rounded bg-gray-50 px-2 py-1.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium" title={m.name}>
+                          {m.name}
+                          {expired && <span className="ml-1 text-gray-400">（已过期）</span>}
+                        </p>
+                        <p className="truncate text-xs text-gray-500" title={m.description}>
+                          {m.description}
+                          {m.expiresAt && !expired ? ` · 截止 ${m.expiresAt.slice(0, 10)}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="删除记忆"
+                        onClick={() => remove(m.id)}
+                        className="shrink-0 text-gray-300 hover:text-red-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
       </div>
     </div>
   )

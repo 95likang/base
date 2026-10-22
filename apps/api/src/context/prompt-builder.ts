@@ -3,6 +3,7 @@
  * 每个 pipe 是纯函数，接收运行时上下文，自行决定要不要出现在最终 prompt 中。
  * build() 只做拼接，无副作用；同一 builder 实例可跨请求复用。
  */
+import { buildMemoryPromptSection, type MemoryEntry } from '../memory/store'
 
 /** 运行时上下文：pipe 据此决定输出内容或返回 null（不出现） */
 export interface PromptContext {
@@ -13,6 +14,8 @@ export interface PromptContext {
   /** 本次请求携带的会话历史消息数（含最新一条用户消息） */
   sessionMessageCount: number
   sessionId: string
+  /** 未过期的持久记忆（请求级加载，注入索引供 LLM 引用） */
+  memories: MemoryEntry[]
 }
 
 type PipeFn = (ctx: PromptContext) => string | null
@@ -79,5 +82,18 @@ export function sessionContext(): PipeFn {
   return (ctx) => {
     if (ctx.sessionMessageCount === 0) return null
     return `[会话信息] 当前会话 ${ctx.sessionId}，已有 ${ctx.sessionMessageCount} 条历史消息。`
+  }
+}
+
+/**
+ * 持久记忆注入：只注入索引（[id] name — description），
+ * 内容靠 memory 工具 read 按需加载（与延迟工具同一懒加载哲学）。
+ * 放在 sessionContext 之前：记忆跨请求可能变化，但变化频率低于会话状态，
+ * 相对稳定的段放前面利于 prompt cache 命中。
+ */
+export function memoryContext(): PipeFn {
+  return (ctx) => {
+    // 索引内容为空时 store 也会返回引导语，这里只处理"未提供"的情况
+    return buildMemoryPromptSection(ctx.memories)
   }
 }

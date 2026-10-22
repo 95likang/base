@@ -26,10 +26,21 @@ export type UsageTotals = {
   steps: number
 }
 
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference'
+
+export type MemoryItem = {
+  id: string
+  type: MemoryType
+  name: string
+  description: string
+  expiresAt: string | null
+}
+
 /** 命令产生的面板视图（联合类型，page 按 kind 分发渲染） */
 export type ChatPanelView =
   | { kind: 'context'; snapshot: ContextSnapshot }
   | { kind: 'usage'; totals: UsageTotals; title: string }
+  | { kind: 'memory'; items: MemoryItem[] }
 
 /** 命令可用的依赖：当前会话 + 面板展示回调 */
 export interface CommandContext {
