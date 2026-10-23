@@ -11,8 +11,8 @@ const MAX_SESSIONS = 500
 
 export interface GatewayOptions {
   model: LanguageModel
-  /** 每条消息新建工具集：锁状态与延迟工具激活按消息隔离 */
-  createRegistry: () => Promise<ToolRegistry> | ToolRegistry
+  /** 每条消息新建工具集：锁状态与延迟工具激活按消息隔离；传入预算让子 Agent 计入同一上限 */
+  createRegistry: (options?: { budget?: BudgetState }) => Promise<ToolRegistry> | ToolRegistry
   /** 按会话构建系统提示；注入记忆/知识库等请求级上下文 */
   buildSystem: (
     registry: ToolRegistry,
@@ -107,7 +107,8 @@ export class ChannelGateway {
     const userMsg: ModelMessage = { role: 'user', content: msg.text }
     const messages: ModelMessage[] = [...session, userMsg]
 
-    const registry = await this.options.createRegistry()
+    const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
+    const registry = await this.options.createRegistry({ budget })
     const system = await this.options.buildSystem(registry, sessionKey, messages.length)
 
     // 只保留最后一个文本块：工具步骤前的旁白不应出现在最终回复里
@@ -120,7 +121,6 @@ export class ChannelGateway {
       merge() {},
       onError: undefined,
     }
-    const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
     await agentLoop(
       this.options.model,
       registry.toAISDKFormat(),

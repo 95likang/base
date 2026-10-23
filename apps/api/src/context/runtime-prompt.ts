@@ -20,6 +20,7 @@ export async function buildRuntimeSystem(
   await ragStore.ensureLoaded()
   return promptBuilder.build({
     toolCount: registry.getActiveTools().length,
+    hasSpawnAgent: registry.getActiveTools().some((tool) => tool.name === 'spawn_agent'),
     deferredToolSummary: registry.getDeferredToolSummary(),
     sessionMessageCount: messageCount,
     sessionId,

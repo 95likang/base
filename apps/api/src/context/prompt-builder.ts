@@ -10,6 +10,8 @@ import type { SkillDefinition } from '../skills/loader'
 export interface PromptContext {
   /** 当前激活的工具数量（已进入 ToolSet，不含延迟未激活的） */
   toolCount: number
+  /** 当前是否可用 spawn_agent（子 Agent 自身不可用，提示里不能引导它派活） */
+  hasSpawnAgent?: boolean
   /** 延迟工具目录（registry.getDeferredToolSummary()，无延迟工具时为空串） */
   deferredToolSummary: string
   /** 本次请求携带的会话历史消息数（含最新一条用户消息） */
@@ -86,7 +88,15 @@ export function coreRules(): PipeFn {
 export function toolGuide(): PipeFn {
   return (ctx) => {
     if (ctx.toolCount === 0) return null
-    return `你有 ${ctx.toolCount} 个工具可用。需要操作本地文件时使用内置工具，需要访问外部服务时使用 MCP 工具。`
+    const lines = [
+      `你有 ${ctx.toolCount} 个工具可用。需要操作本地文件时使用内置工具，需要访问外部服务时使用 MCP 工具。`,
+    ]
+    if (ctx.hasSpawnAgent) {
+      lines.push(
+        '涉及多个独立目标的调研、对比任务时，优先用 spawn_agent 并行执行，避免把大量探索过程堆进当前上下文。',
+      )
+    }
+    return lines.join('\n')
   }
 }
 

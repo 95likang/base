@@ -92,10 +92,12 @@ export const chatRoute = new Hono().post(
     }
 
     const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
+    // 请求级 Token 预算：所有步骤累计，子 Agent 的消耗也计入同一个上限
+    const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
     // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
     // 文件工具限制在 TOOL_WORKSPACE_DIR 指定的工作区内（默认 <cwd>/workspace），
     // 路径越界一律拒绝；TOOL_WORKSPACE_GUARD=false 可关闭该守卫（仅限本地开发）。
-    const registry = await createDefaultToolRegistry()
+    const registry = await createDefaultToolRegistry({ budget })
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）
@@ -104,6 +106,7 @@ export const chatRoute = new Hono().post(
     await ragStore.ensureLoaded()
     const promptCtx: PromptContext = {
       toolCount: registry.getActiveTools().length,
+      hasSpawnAgent: registry.getActiveTools().some((tool) => tool.name === 'spawn_agent'),
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: messages.length,
       sessionId: chatId,
@@ -164,9 +167,7 @@ export const chatRoute = new Hono().post(
       // 提供 originalMessages：流会为回复消息生成 id，onEnd 能拿到完整消息列表
       originalMessages: messages,
       execute: async ({ writer }) => {
-        // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token；
-        // Token 预算限制单次请求的总消耗（所有步骤累计）
-        const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
+        // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token
         await agentLoop(
           model,
           tools,

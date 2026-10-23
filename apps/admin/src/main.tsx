@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { AgentsPage } from './AgentsPage'
 import { AuthForm } from './AuthForm'
 import { ChannelsPage } from './ChannelsPage'
 import { CronPage } from './CronPage'
@@ -21,7 +22,7 @@ if (!rootEl) throw new Error('Root element #root not found')
 function App() {
   const { data: session, isPending } = authClient.useSession()
   const [tab, setTab] = useState<
-    'users' | 'rag' | 'skills' | 'plugins' | 'channels' | 'cron' | 'security'
+    'users' | 'rag' | 'skills' | 'plugins' | 'channels' | 'cron' | 'agents' | 'security'
   >('users')
 
   if (isPending) {
@@ -54,6 +55,9 @@ function App() {
           <TabButton active={tab === 'cron'} onClick={() => setTab('cron')}>
             定时任务
           </TabButton>
+          <TabButton active={tab === 'agents'} onClick={() => setTab('agents')}>
+            子 Agent
+          </TabButton>
           <TabButton active={tab === 'security'} onClick={() => setTab('security')}>
             执行权限
           </TabButton>
@@ -79,6 +83,8 @@ function App() {
         <ChannelsPage />
       ) : tab === 'cron' ? (
         <CronPage />
+      ) : tab === 'agents' ? (
+        <AgentsPage />
       ) : (
         <SecurityPage />
       )}

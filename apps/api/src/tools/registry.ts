@@ -344,6 +344,23 @@ export class ToolRegistry {
     this.emittedSet = result
     return result as ToolSet
   }
+
+  /**
+   * 复制一份工具目录，锁状态独立。
+   * 子 Agent 在 spawn_agent 的 execute 内运行，此时父注册表的独占锁未释放，
+   * 直接复用同一个 registry 会在子 Agent 调工具时死锁。
+   * 角色、Hook 管线与延迟工具激活状态一并继承；exclude 用于剔除不可用工具。
+   */
+  fork(options?: { exclude?: Set<string> }): ToolRegistry {
+    const forked = new ToolRegistry()
+    for (const tool of this.tools.values()) {
+      if (!options?.exclude?.has(tool.name)) forked.register(tool)
+    }
+    forked.currentRole = this.currentRole
+    forked.hookPipeline = this.hookPipeline
+    forked.discoveredTools = new Set(this.discoveredTools)
+    return forked
+  }
 }
 
 /**

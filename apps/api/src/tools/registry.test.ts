@@ -227,6 +227,45 @@ describe('延迟加载层', () => {
   })
 })
 
+describe('fork：子 Agent 独立锁', () => {
+  it('继承工具并按名排除', () => {
+    const registry = new ToolRegistry()
+    registry.register(makeTool({ name: 'a' }), makeTool({ name: 'spawn_agent' }))
+    const forked = registry.fork({ exclude: new Set(['spawn_agent']) })
+    expect(forked.get('a')).toBeDefined()
+    expect(forked.get('spawn_agent')).toBeUndefined()
+  })
+
+  it('父 Agent 独占锁执行期间，fork 的工具仍可执行（不会死锁）', async () => {
+    const registry = new ToolRegistry()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registry.register(
+      makeTool({
+        name: 'slow',
+        execute: async () => {
+          await gate
+          return 'slow'
+        },
+      }),
+      makeTool({ name: 'fast', isConcurrencySafe: true }),
+    )
+
+    const parent = asExecutables(registry.toAISDKFormat())
+    const running = parent.slow.execute({})
+    // 等父 Agent 真正拿到独占锁
+    await new Promise((r) => setTimeout(r, 10))
+
+    const child = asExecutables(registry.fork().toAISDKFormat())
+    await expect(child.fast.execute({})).resolves.toBe('ok')
+
+    release()
+    await running
+  })
+})
+
 describe('截断层', () => {
   it('结果对象序列化为 JSON 字符串', async () => {
     const registry = new ToolRegistry()

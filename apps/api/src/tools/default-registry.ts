@@ -1,3 +1,5 @@
+import type { BudgetState } from '../agent/loop'
+import { subAgentRegistry } from '../agents'
 import { cronService } from '../cron'
 import { pluginManager } from '../plugins'
 import { ragEmbedder, ragStore } from '../rag/service'
@@ -19,6 +21,7 @@ import { ToolRegistry } from './registry'
 import { pickSearchTool, startPreviewTool, webFetchTool } from './search-tools'
 import { bashTool } from './shell-tools'
 import { createSkillTool } from './skill-tools'
+import { createSpawnTool } from './spawn-tools'
 import { createToolSearchTool } from './tool-search'
 import { calculatorTool, weatherTool } from './utility-tools'
 
@@ -29,7 +32,10 @@ import { calculatorTool, weatherTool } from './utility-tools'
  * 放在独立文件（而非 tools/index.ts）是为了让 barrel 保持无副作用：
  * 只导入单个工具的模块不应连带求值 pluginManager / ragStore / skillLoader。
  */
-export async function createDefaultToolRegistry(): Promise<ToolRegistry> {
+export async function createDefaultToolRegistry(options?: {
+  /** 调用方的 token 预算：子 Agent 的消耗同步计入，避免绕过父循环上限 */
+  budget?: BudgetState
+}): Promise<ToolRegistry> {
   const registry = new ToolRegistry()
   registry.register(
     weatherTool,
@@ -57,6 +63,8 @@ export async function createDefaultToolRegistry(): Promise<ToolRegistry> {
   registry.register(createSkillTool(skillLoader))
   // 定时任务管理：与 /api/cron 管理页共用同一个进程级调度器
   registry.register(createCronTool(cronService))
+  // 子 Agent：独立上下文执行 + 结果压缩回传，运行记录进进程级注册表
+  registry.register(createSpawnTool(subAgentRegistry, registry, options?.budget))
   // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）
   registry.register(...pluginManager.getTools())
   // 安全层：继承进程级角色，挂上共享的 hook 管线

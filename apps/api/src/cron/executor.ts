@@ -26,7 +26,8 @@ export async function startCron(): Promise<void> {
   cronService.setExecutor({
     runAgentPrompt: async (prompt, timeout = 60_000) => {
       const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
-      const registry = await createDefaultToolRegistry()
+      const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
+      const registry = await createDefaultToolRegistry({ budget })
       const messages: ModelMessage[] = [{ role: 'user', content: prompt }]
       const system = await buildRuntimeSystem(registry, 'cron', messages.length)
 
@@ -44,8 +45,6 @@ export async function startCron(): Promise<void> {
         merge() {},
         onError: undefined,
       }
-      const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
-
       try {
         await agentLoop(
           model,

@@ -7,6 +7,7 @@ import { channelGateway } from './channels'
 import { startCron } from './cron/executor'
 import { onError } from './lib/api-error'
 import { pluginManager } from './plugins'
+import { agentsRoute } from './routes/agents'
 import { channelsRoute } from './routes/channels'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { cronRoute } from './routes/cron'
@@ -48,6 +49,7 @@ const routes = app
   .route('/api/users', usersRoute)
   .route('/api/chats', chatsRoute)
   .route('/api/chat', chatRoute)
+  .route('/api/agents', agentsRoute)
   .route('/api/channels', channelsRoute)
   .route('/api/cron', cronRoute)
   .route('/api/memory', memoryRoute)
