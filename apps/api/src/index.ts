@@ -4,10 +4,12 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
 import { channelGateway } from './channels'
+import { startCron } from './cron/executor'
 import { onError } from './lib/api-error'
 import { pluginManager } from './plugins'
 import { channelsRoute } from './routes/channels'
 import { chatRoute, chatsRoute } from './routes/chat'
+import { cronRoute } from './routes/cron'
 import { memoryRoute } from './routes/memory'
 import { pluginsRoute } from './routes/plugins'
 import { ragRoute } from './routes/rag'
@@ -47,6 +49,7 @@ const routes = app
   .route('/api/chats', chatsRoute)
   .route('/api/chat', chatRoute)
   .route('/api/channels', channelsRoute)
+  .route('/api/cron', cronRoute)
   .route('/api/memory', memoryRoute)
   .route('/api/plugins', pluginsRoute)
   .route('/api/rag', ragRoute)
@@ -72,6 +75,8 @@ serve({ fetch: app.fetch, port }, async (info) => {
   // Channel 启动：单个通道失败不影响 API 与其它通道
   console.log('  启动 Channel...')
   await channelGateway.startAll()
+  // Cron 调度：从数据库恢复任务并注入 Agent 执行器（逾期的一次性任务会立即补跑）
+  await startCron()
 })
 
 /**

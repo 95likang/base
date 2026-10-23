@@ -3,6 +3,7 @@ import { StrictMode, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AuthForm } from './AuthForm'
 import { ChannelsPage } from './ChannelsPage'
+import { CronPage } from './CronPage'
 import { authClient } from './lib/auth-client'
 import { PluginsPage } from './PluginsPage'
 import { RagPage } from './RagPage'
@@ -19,9 +20,9 @@ if (!rootEl) throw new Error('Root element #root not found')
 /** 会话门控：未登录显示 AuthForm，登录后显示业务页面。 */
 function App() {
   const { data: session, isPending } = authClient.useSession()
-  const [tab, setTab] = useState<'users' | 'rag' | 'skills' | 'plugins' | 'channels' | 'security'>(
-    'users',
-  )
+  const [tab, setTab] = useState<
+    'users' | 'rag' | 'skills' | 'plugins' | 'channels' | 'cron' | 'security'
+  >('users')
 
   if (isPending) {
     return <p className="mx-auto max-w-xl p-8 text-gray-500">Loading…</p>
@@ -50,6 +51,9 @@ function App() {
           <TabButton active={tab === 'channels'} onClick={() => setTab('channels')}>
             Channels
           </TabButton>
+          <TabButton active={tab === 'cron'} onClick={() => setTab('cron')}>
+            定时任务
+          </TabButton>
           <TabButton active={tab === 'security'} onClick={() => setTab('security')}>
             执行权限
           </TabButton>
@@ -73,6 +77,8 @@ function App() {
         <PluginsPage />
       ) : tab === 'channels' ? (
         <ChannelsPage />
+      ) : tab === 'cron' ? (
+        <CronPage />
       ) : (
         <SecurityPage />
       )}
