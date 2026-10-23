@@ -25,6 +25,7 @@ import {
 } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
 import { listActiveMemories } from '../memory/store'
+import { pluginManager } from '../plugins'
 import { ragEmbedder, ragStore } from '../rag/service'
 import {
   createChat,
@@ -159,6 +160,8 @@ export const chatRoute = new Hono().post(
     registry.register(...createRagTools(ragStore, ragEmbedder))
     // Skill 工具：系统提示只给索引，模型按需 load 完整指令
     registry.register(createSkillTool(skillLoader))
+    // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）
+    registry.register(...pluginManager.getTools())
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）

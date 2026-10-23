@@ -4,8 +4,10 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
 import { onError } from './lib/api-error'
+import { pluginManager } from './plugins'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { memoryRoute } from './routes/memory'
+import { pluginsRoute } from './routes/plugins'
 import { ragRoute } from './routes/rag'
 import { skillsRoute } from './routes/skills'
 import { usageRoute } from './routes/usage'
@@ -42,15 +44,26 @@ const routes = app
   .route('/api/chats', chatsRoute)
   .route('/api/chat', chatRoute)
   .route('/api/memory', memoryRoute)
+  .route('/api/plugins', pluginsRoute)
   .route('/api/rag', ragRoute)
   .route('/api/skills', skillsRoute)
   .route('/api/usage', usageRoute)
 
 const port = Number(process.env.PORT ?? 3000)
-serve({ fetch: app.fetch, port }, (info) => {
+serve({ fetch: app.fetch, port }, async (info) => {
   console.log(`🚀 API listening on http://localhost:${info.port}`)
   // MCP 预热：启动时后台连接（不阻塞监听），首个对话请求不再承担 npx 拉起子进程的耗时
   void getMcpTools()
+  // 插件自动加载：单个插件失败不影响启动与其它插件
+  console.log('  加载插件...')
+  for (const plugin of pluginManager.list()) {
+    try {
+      const tools = await pluginManager.load(plugin.name)
+      console.log(`  ✓ ${plugin.name} — ${tools.length} 个工具`)
+    } catch {
+      console.log(`  ✗ ${plugin.name} — 加载失败`)
+    }
+  }
 })
 
 /**
