@@ -4,6 +4,7 @@
  * build() 只做拼接，无副作用；同一 builder 实例可跨请求复用。
  */
 import { buildMemoryPromptSection, type MemoryEntry } from '../memory/store'
+import type { SkillDefinition } from '../skills/loader'
 
 /** 运行时上下文：pipe 据此决定输出内容或返回 null（不出现） */
 export interface PromptContext {
@@ -18,6 +19,8 @@ export interface PromptContext {
   memories: MemoryEntry[]
   /** 当前 embedding 模型下已索引的知识库规模（空库时 size 为 0） */
   knowledgeBase: { size: number; sources: string[] }
+  /** 可用的 skills（启动时扫描，注入索引，正文靠 skill 工具懒加载） */
+  skills: Pick<SkillDefinition, 'name' | 'description' | 'whenToUse'>[]
 }
 
 type PipeFn = (ctx: PromptContext) => string | null
@@ -112,5 +115,23 @@ export function ragContext(): PipeFn {
     const shown = sources.slice(0, 10).join(', ')
     const suffix = sources.length > 10 ? ` 等 ${sources.length} 个来源` : ''
     return `[知识库] 已导入 ${size} 个文档片段（来源: ${shown}${suffix}）。需要查资料时用 rag_search 工具检索后再回答。`
+  }
+}
+
+/**
+ * Skills 索引注入：只给 name/description/when_to_use，
+ * 正文靠 skill 工具按需加载（与记忆索引、延迟工具同一懒加载哲学）。
+ */
+export function skillsContext(): PipeFn {
+  return (ctx) => {
+    if (ctx.skills.length === 0) return null
+
+    const lines = ctx.skills.map(
+      (s) => `  - ${s.name} — ${s.description}${s.whenToUse ? `（适用场景: ${s.whenToUse}）` : ''}`,
+    )
+    return [
+      `[可用 Skills] 共 ${ctx.skills.length} 个（决定使用时先用 skill 工具加载完整指令，再按指令执行）：`,
+      ...lines,
+    ].join('\n')
   }
 }

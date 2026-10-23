@@ -9,12 +9,14 @@ import {
   PromptBuilder,
   ragContext,
   sessionContext,
+  skillsContext,
   toolGuide,
 } from '../context/prompt-builder'
 import { buildContextSnapshot } from '../context/view'
 import { buildMemoryPromptSection, listActiveMemories } from '../memory/store'
 import { ragStore } from '../rag/service'
 import { getMessageCreatedAt, listMessages } from '../session/store'
+import { skillLoader } from '../skills'
 import {
   bashTool,
   calculatorTool,
@@ -80,23 +82,27 @@ export const usageRoute = new Hono()
     )
     const memories = await listActiveMemories()
     await ragStore.ensureLoaded()
-    // 只构建一次 memory 段：pipe 与 memoryChars 共用（build 内部会再次调用各 pipe）
-    const memorySection = buildMemoryPromptSection(memories)
-    const promptBuilder = new PromptBuilder()
-      .pipe('core-rules', coreRules())
-      .pipe('tool-guide', toolGuide())
-      .pipe('deferred-tools', deferredTools())
-      .pipe('memory-context', () => memorySection)
-      .pipe('rag-context', ragContext())
-      .pipe('session-context', sessionContext())
-    const system = promptBuilder.build({
+    const promptCtx = {
       toolCount: registry.getActiveTools().length,
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: modelMessages.length,
       sessionId: chatId ?? 'new',
       memories,
       knowledgeBase: { size: ragStore.size(), sources: ragStore.sources() },
-    })
+      skills: skillLoader.list(),
+    }
+    // 只构建一次 memory / skills 段：pipe 与快照的 chars 共用（build 内部会再次调用各 pipe）
+    const memorySection = buildMemoryPromptSection(memories)
+    const skillsSection = skillsContext()(promptCtx)
+    const promptBuilder = new PromptBuilder()
+      .pipe('core-rules', coreRules())
+      .pipe('tool-guide', toolGuide())
+      .pipe('deferred-tools', deferredTools())
+      .pipe('memory-context', () => memorySection)
+      .pipe('rag-context', ragContext())
+      .pipe('skills-context', () => skillsSection)
+      .pipe('session-context', sessionContext())
+    const system = promptBuilder.build(promptCtx)
 
     const modelId = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'
     const snapshot = buildContextSnapshot({
@@ -110,7 +116,7 @@ export const usageRoute = new Hono()
           0,
         ),
       memoryChars: memorySection.length,
-      skillsChars: 0,
+      skillsChars: skillsSection?.length ?? 0,
       messages: modelMessages,
     })
     return c.json(snapshot)

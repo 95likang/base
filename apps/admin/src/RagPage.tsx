@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
-import { client } from './lib/api'
+import { client, readError } from './lib/api'
 
 interface SearchHit {
   id: string
@@ -13,12 +13,6 @@ interface SearchHit {
 
 const DOCS_KEY = ['rag', 'documents']
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
-
-/** 统一读取后端错误体 { error: { message } } */
-async function readError(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-  return body?.error?.message ?? `请求失败 (${res.status})`
-}
 
 /**
  * 知识库管理页：上传/路径导入、文档列表、删除、检索预览。

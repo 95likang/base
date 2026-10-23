@@ -7,6 +7,7 @@ import { onError } from './lib/api-error'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { memoryRoute } from './routes/memory'
 import { ragRoute } from './routes/rag'
+import { skillsRoute } from './routes/skills'
 import { usageRoute } from './routes/usage'
 import { usersRoute } from './routes/users'
 import { getMcpTools } from './tools'
@@ -42,6 +43,7 @@ const routes = app
   .route('/api/chat', chatRoute)
   .route('/api/memory', memoryRoute)
   .route('/api/rag', ragRoute)
+  .route('/api/skills', skillsRoute)
   .route('/api/usage', usageRoute)
 
 const port = Number(process.env.PORT ?? 3000)

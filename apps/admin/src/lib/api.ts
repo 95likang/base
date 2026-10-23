@@ -10,3 +10,9 @@ import { hc } from 'hono/client'
  * origin via an env var.
  */
 export const client = hc<AppType>(import.meta.env.VITE_API_URL ?? '/')
+
+/** 统一读取后端错误体 { error: { message } } */
+export async function readError(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
+  return body?.error?.message ?? `请求失败 (${res.status})`
+}

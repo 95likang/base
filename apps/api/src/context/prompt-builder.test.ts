@@ -6,6 +6,7 @@ import {
   PromptBuilder,
   type PromptContext,
   sessionContext,
+  skillsContext,
   toolGuide,
 } from './prompt-builder'
 
@@ -17,6 +18,7 @@ function makeCtx(overrides: Partial<PromptContext> = {}): PromptContext {
     sessionId: 'chat-1',
     memories: [],
     knowledgeBase: { size: 0, sources: [] },
+    skills: [],
     ...overrides,
   }
 }
@@ -93,5 +95,25 @@ describe('预定义 pipe', () => {
     expect(out).toContain('截止 2026-05-07')
     // 索引懒加载：content 不进 prompt
     expect(out).not.toContain('写示例代码时优先用 TypeScript')
+  })
+
+  it('skillsContext：无 skill 时为 null，有则只注入索引含适用场景', () => {
+    expect(skillsContext()(makeCtx())).toBeNull()
+    const out = skillsContext()(
+      makeCtx({
+        skills: [
+          {
+            name: 'code-review',
+            description: '审查代码',
+            whenToUse: '用户要求 review 时',
+            content: '正文不应进入 prompt',
+          },
+        ],
+      }),
+    )
+    expect(out).toContain('[可用 Skills] 共 1 个')
+    expect(out).toContain('code-review — 审查代码')
+    expect(out).toContain('适用场景: 用户要求 review 时')
+    expect(out).not.toContain('正文不应进入 prompt')
   })
 })

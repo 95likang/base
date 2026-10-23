@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { AuthForm } from './AuthForm'
 import { authClient } from './lib/auth-client'
 import { RagPage } from './RagPage'
+import { SkillsPage } from './SkillsPage'
 import { UsersPage } from './UsersPage'
 import './index.css'
 
@@ -15,7 +16,7 @@ if (!rootEl) throw new Error('Root element #root not found')
 /** 会话门控：未登录显示 AuthForm，登录后显示业务页面。 */
 function App() {
   const { data: session, isPending } = authClient.useSession()
-  const [tab, setTab] = useState<'users' | 'rag'>('users')
+  const [tab, setTab] = useState<'users' | 'rag' | 'skills'>('users')
 
   if (isPending) {
     return <p className="mx-auto max-w-xl p-8 text-gray-500">Loading…</p>
@@ -35,6 +36,9 @@ function App() {
           <TabButton active={tab === 'rag'} onClick={() => setTab('rag')}>
             知识库
           </TabButton>
+          <TabButton active={tab === 'skills'} onClick={() => setTab('skills')}>
+            Skills
+          </TabButton>
         </nav>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-600">
@@ -45,7 +49,7 @@ function App() {
           </button>
         </div>
       </header>
-      {tab === 'users' ? <UsersPage /> : <RagPage />}
+      {tab === 'users' ? <UsersPage /> : tab === 'rag' ? <RagPage /> : <SkillsPage />}
     </>
   )
 }

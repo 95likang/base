@@ -20,6 +20,7 @@ import {
   type PromptContext,
   ragContext,
   sessionContext,
+  skillsContext,
   toolGuide,
 } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
@@ -35,11 +36,13 @@ import {
   saveAssistantMessage,
   saveUserMessage,
 } from '../session/store'
+import { skillLoader } from '../skills'
 import {
   bashTool,
   calculatorTool,
   createMemoryTool,
   createRagTools,
+  createSkillTool,
   createToolSearchTool,
   editFileTool,
   getMcpTools,
@@ -66,6 +69,7 @@ const promptBuilder = new PromptBuilder()
   .pipe('deferred-tools', deferredTools())
   .pipe('memory-context', memoryContext())
   .pipe('rag-context', ragContext())
+  .pipe('skills-context', skillsContext())
   .pipe('session-context', sessionContext())
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
@@ -153,6 +157,8 @@ export const chatRoute = new Hono().post(
     registry.register(createMemoryTool())
     // 知识库工具：导入工作区文档 + 混合检索（与管理页共用同一 store）
     registry.register(...createRagTools(ragStore, ragEmbedder))
+    // Skill 工具：系统提示只给索引，模型按需 load 完整指令
+    registry.register(createSkillTool(skillLoader))
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）
@@ -166,6 +172,7 @@ export const chatRoute = new Hono().post(
       sessionId: chatId,
       memories,
       knowledgeBase: { size: ragStore.size(), sources: ragStore.sources() },
+      skills: skillLoader.list(),
     }
     const system = promptBuilder.build(promptCtx)
     promptBuilder.debug(promptCtx)
