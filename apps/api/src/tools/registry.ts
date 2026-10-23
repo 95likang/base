@@ -1,7 +1,12 @@
 import { jsonSchema, type ToolSet } from 'ai'
+import { classifyBashCommand } from '../security/bash-classifier'
+import type { HookPipeline } from '../security/hooks'
+import { canUseTool, type Role } from '../security/roles'
 
 /** 结果截断默认上限（字符数），超出部分头尾保留、中间省略 */
 const DEFAULT_MAX_RESULT_CHARS = 3000
+/** 日志里的命令长度上限：避免把命令中的密钥等敏感信息整段写进日志 */
+const LOG_COMMAND_MAX_CHARS = 120
 
 /** execute 收到的运行时选项（由 AI SDK 传入，abortSignal 随请求取消触发） */
 export interface ToolExecuteOptions {
@@ -66,6 +71,10 @@ export class ToolRegistry {
   /** toAISDKFormat 最近产出的 ToolSet 引用：激活新工具时原地更新，让进行中的 agentLoop 立即可见 */
   private emittedSet: Record<string, unknown> | undefined
 
+  // —— 安全状态 ——
+  private currentRole: Role = 'owner'
+  private hookPipeline: HookPipeline | undefined
+
   register(...tools: ToolDefinition[]): void {
     for (const tool of tools) {
       this.tools.set(tool.name, tool)
@@ -80,9 +89,24 @@ export class ToolRegistry {
     return Array.from(this.tools.values())
   }
 
-  /** 当前激活的工具（延迟且未发现的工具排除在外） */
+  /** 切换当前角色：角色不允许的工具不会暴露给模型 */
+  setRole(role: Role): void {
+    this.currentRole = role
+  }
+
+  /** 注入 Hook 管线：工具执行前后触发 */
+  setHookPipeline(pipeline: HookPipeline): void {
+    this.hookPipeline = pipeline
+  }
+
+  /** 当前激活的工具（延迟未发现、角色不允许的工具排除在外） */
   getActiveTools(): ToolDefinition[] {
-    return this.getAll().filter((tool) => !this.isDeferred(tool))
+    return this.getAll().filter((tool) => !this.isDeferred(tool) && this.isAllowed(tool))
+  }
+
+  /** 角色是否允许使用该工具 */
+  private isAllowed(tool: ToolDefinition): boolean {
+    return canUseTool(this.currentRole, tool.name)
   }
 
   /** 是否处于"延迟且未激活"状态 */
@@ -95,7 +119,7 @@ export class ToolRegistry {
    * 没有延迟工具时返回空字符串。
    */
   getDeferredToolSummary(): string {
-    const deferred = this.getAll().filter((tool) => this.isDeferred(tool))
+    const deferred = this.getAll().filter((tool) => this.isDeferred(tool) && this.isAllowed(tool))
     if (deferred.length === 0) return ''
 
     const lines = deferred.map((t) => {
@@ -132,7 +156,7 @@ export class ToolRegistry {
     const results: ToolDefinition[] = []
     for (const name of names) {
       const tool = this.tools.get(name)
-      if (tool && tool.shouldDefer === true) {
+      if (tool && tool.shouldDefer === true && this.isAllowed(tool)) {
         activate(tool, results)
       }
     }
@@ -144,6 +168,7 @@ export class ToolRegistry {
     for (const tool of this.tools.values()) {
       if (
         this.isDeferred(tool) &&
+        this.isAllowed(tool) &&
         (tool.name.toLowerCase().includes(q) || tool.searchHint?.toLowerCase().includes(q))
       ) {
         activate(tool, results)
@@ -161,6 +186,7 @@ export class ToolRegistry {
     let active = 0
     let deferred = 0
     for (const tool of this.tools.values()) {
+      if (!this.isAllowed(tool)) continue
       const schemaSize = JSON.stringify({
         name: tool.name,
         description: tool.description,
@@ -214,6 +240,28 @@ export class ToolRegistry {
   }
 
   /**
+   * bash 风险检测：危险命令返回拒绝文案（工具不执行）；中风险只告警。
+   * 非 bash 工具（或没有 command 字段）直接放行。
+   */
+  private bashRiskRejection(input: unknown): string | undefined {
+    const command = (input as { command?: unknown } | undefined)?.command
+    if (typeof command !== 'string') return undefined
+
+    const risk = classifyBashCommand(command)
+    if (risk.level === 'dangerous') {
+      return `[拒绝执行] 检测到危险操作: ${risk.reason}\n命令: ${command}`
+    }
+    if (risk.level === 'moderate') {
+      const shown =
+        command.length > LOG_COMMAND_MAX_CHARS
+          ? `${command.slice(0, LOG_COMMAND_MAX_CHARS)}…`
+          : command
+      console.log(`  [安全] ⚠ ${risk.reason}: ${shown}`)
+    }
+    return undefined
+  }
+
+  /**
    * 执行层 + 截断层：把单个工具包装为 AI SDK 的工具条目。
    * execute 包装不改变工具的返回值语义——
    * 序列化为字符串、截断、加锁，全部对模型透明。
@@ -228,15 +276,50 @@ export class ToolRegistry {
       inputSchema: jsonSchema(tool.parameters),
       // biome-ignore lint/suspicious/noExplicitAny: 入参类型由 ToolDefinition.execute 约定，透传即可
       execute: async (input: any, options: ToolExecuteOptions) => {
+        // Bash 风险检测：dangerous 直接拒绝；moderate 只告警（全拦的话 Agent 干不了活）
+        if (tool.name === 'bash') {
+          const rejection = this.bashRiskRejection(input)
+          if (rejection) return rejection
+        }
+
+        // Pre Hook：block 时工具不执行；modify 用改后的输入继续
+        let effectiveInput = input
+        if (this.hookPipeline) {
+          const preResult = await this.hookPipeline.runPre(tool.name, effectiveInput)
+          if (preResult.action === 'block') {
+            return `[Hook 拦截] ${preResult.reason ?? '操作被阻止'}`
+          }
+          if (preResult.modifiedInput !== undefined) {
+            effectiveInput = preResult.modifiedInput
+          }
+        }
+
+        // hook 改动过输入就再检一次，避免借 hook 把危险命令送进 bash
+        if (tool.name === 'bash' && effectiveInput !== input) {
+          const rejection = this.bashRiskRejection(effectiveInput)
+          if (rejection) return rejection
+        }
+
         if (isSafe) {
           await this.acquireConcurrent()
         } else {
           await this.acquireExclusive()
         }
         try {
-          const raw = await executeFn(input, options)
+          const raw = await executeFn(effectiveInput, options)
           const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
-          return truncateResult(text, maxChars)
+          let output = text
+
+          // Post Hook：可替换输出内容
+          if (this.hookPipeline) {
+            const postResult = await this.hookPipeline.runPost(tool.name, effectiveInput, output)
+            if (postResult.modifiedOutput !== undefined) {
+              output = String(postResult.modifiedOutput)
+            }
+          }
+
+          // 截断放在 hook 之后：hook 追加的内容同样受上限约束
+          return truncateResult(output, maxChars)
         } finally {
           if (isSafe) {
             this.releaseConcurrent()

@@ -11,6 +11,7 @@ import { chatRoute, chatsRoute } from './routes/chat'
 import { memoryRoute } from './routes/memory'
 import { pluginsRoute } from './routes/plugins'
 import { ragRoute } from './routes/rag'
+import { securityRoute } from './routes/security'
 import { skillsRoute } from './routes/skills'
 import { usageRoute } from './routes/usage'
 import { usersRoute } from './routes/users'
@@ -49,6 +50,7 @@ const routes = app
   .route('/api/memory', memoryRoute)
   .route('/api/plugins', pluginsRoute)
   .route('/api/rag', ragRoute)
+  .route('/api/security', securityRoute)
   .route('/api/skills', skillsRoute)
   .route('/api/usage', usageRoute)
 

@@ -6,6 +6,7 @@ import { ChannelsPage } from './ChannelsPage'
 import { authClient } from './lib/auth-client'
 import { PluginsPage } from './PluginsPage'
 import { RagPage } from './RagPage'
+import { SecurityPage } from './SecurityPage'
 import { SkillsPage } from './SkillsPage'
 import { UsersPage } from './UsersPage'
 import './index.css'
@@ -18,7 +19,9 @@ if (!rootEl) throw new Error('Root element #root not found')
 /** 会话门控：未登录显示 AuthForm，登录后显示业务页面。 */
 function App() {
   const { data: session, isPending } = authClient.useSession()
-  const [tab, setTab] = useState<'users' | 'rag' | 'skills' | 'plugins' | 'channels'>('users')
+  const [tab, setTab] = useState<'users' | 'rag' | 'skills' | 'plugins' | 'channels' | 'security'>(
+    'users',
+  )
 
   if (isPending) {
     return <p className="mx-auto max-w-xl p-8 text-gray-500">Loading…</p>
@@ -47,6 +50,9 @@ function App() {
           <TabButton active={tab === 'channels'} onClick={() => setTab('channels')}>
             Channels
           </TabButton>
+          <TabButton active={tab === 'security'} onClick={() => setTab('security')}>
+            执行权限
+          </TabButton>
         </nav>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-600">
@@ -65,8 +71,10 @@ function App() {
         <SkillsPage />
       ) : tab === 'plugins' ? (
         <PluginsPage />
-      ) : (
+      ) : tab === 'channels' ? (
         <ChannelsPage />
+      ) : (
+        <SecurityPage />
       )}
     </>
   )

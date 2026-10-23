@@ -14,6 +14,7 @@ import {
 import { buildContextSnapshot } from '../context/view'
 import { buildMemoryPromptSection, listActiveMemories } from '../memory/store'
 import { ragStore } from '../rag/service'
+import { getRole } from '../security'
 import { getMessageCreatedAt, listMessages } from '../session/store'
 import { skillLoader } from '../skills'
 import {
@@ -59,6 +60,8 @@ export const usageRoute = new Hono()
     }
 
     const registry = new ToolRegistry()
+    // 与对话请求保持同一口径：角色过滤后实际暴露的工具才计入 prompt 估算
+    registry.setRole(getRole())
     registry.register(
       weatherTool,
       calculatorTool,

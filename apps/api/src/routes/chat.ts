@@ -113,12 +113,13 @@ export const chatRoute = new Hono().post(
     }
     const system = promptBuilder.build(promptCtx)
     promptBuilder.debug(promptCtx)
-    // 工具统计：观测延迟加载对 prompt token 的节省效果
+    // 工具统计：观测延迟加载对 prompt token 的节省效果。
+    // 「全部」含角色不允许的工具，故不参与"活跃 + 延迟"的等式。
     const allCount = registry.getAll().length
     const activeCount = registry.getActiveTools().length
     const estimate = registry.countTokenEstimate()
     console.log(
-      `[工具统计] 全部 ${allCount} | 活跃 ${activeCount} | 延迟 ${allCount - activeCount} | ` +
+      `[工具统计] 全部 ${allCount} | 活跃 ${activeCount} | ` +
         `Token 估算 ~${estimate.active}（活跃）+ ~${estimate.deferred}（延迟，不占 prompt）`,
     )
     // 三层即时防线（治理存量历史）→ 两层压缩（microcompact / summarize），全部仅内存：
