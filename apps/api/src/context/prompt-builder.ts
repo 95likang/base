@@ -59,6 +59,21 @@ export class PromptBuilder {
 
 // ── 预定义的 Pipe ────────────────────────────────
 
+/**
+ * 默认 system prompt 管道：对话路由与 Channel 共用。
+ * build 为纯函数，实例可跨请求复用。
+ */
+export function createPromptBuilder(): PromptBuilder {
+  return new PromptBuilder()
+    .pipe('core-rules', coreRules())
+    .pipe('tool-guide', toolGuide())
+    .pipe('deferred-tools', deferredTools())
+    .pipe('memory-context', memoryContext())
+    .pipe('rag-context', ragContext())
+    .pipe('skills-context', skillsContext())
+    .pipe('session-context', sessionContext())
+}
+
 export function coreRules(): PipeFn {
   return () => `你是 Super Agent，一个有工具调用能力的 AI 助手。用中文简洁回答。
 你的行为准则：

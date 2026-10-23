@@ -3,7 +3,7 @@ import type { UIMessage } from 'ai'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { agentLoop, type BudgetState } from '../agent/loop'
+import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
 import { anthropic } from '../agent/model'
 import { microcompact, summarize } from '../context/compressor'
 import {
@@ -12,21 +12,10 @@ import {
   estimateMessageTokens,
   TokenTracker,
 } from '../context/defense'
-import {
-  coreRules,
-  deferredTools,
-  memoryContext,
-  PromptBuilder,
-  type PromptContext,
-  ragContext,
-  sessionContext,
-  skillsContext,
-  toolGuide,
-} from '../context/prompt-builder'
+import { createPromptBuilder, type PromptContext } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
 import { listActiveMemories } from '../memory/store'
-import { pluginManager } from '../plugins'
-import { ragEmbedder, ragStore } from '../rag/service'
+import { ragStore } from '../rag/service'
 import {
   createChat,
   deleteChat,
@@ -38,40 +27,11 @@ import {
   saveUserMessage,
 } from '../session/store'
 import { skillLoader } from '../skills'
-import {
-  bashTool,
-  calculatorTool,
-  createMemoryTool,
-  createRagTools,
-  createSkillTool,
-  createToolSearchTool,
-  editFileTool,
-  getMcpTools,
-  globTool,
-  grepTool,
-  listDirectoryTool,
-  pickSearchTool,
-  readFileTool,
-  startPreviewTool,
-  ToolRegistry,
-  weatherTool,
-  webFetchTool,
-  writeFileTool,
-} from '../tools'
-import { usageLog } from './usage'
-
-/** 单次请求的 Token 预算上限（所有步骤累计） */
-const TOKEN_BUDGET = 200_000
+import { createDefaultToolRegistry } from '../tools/default-registry'
+import { usageLog } from '../usage'
 
 /** 系统提示管道：模块级单例（build 为纯函数，无请求级状态，可跨请求复用） */
-const promptBuilder = new PromptBuilder()
-  .pipe('core-rules', coreRules())
-  .pipe('tool-guide', toolGuide())
-  .pipe('deferred-tools', deferredTools())
-  .pipe('memory-context', memoryContext())
-  .pipe('rag-context', ragContext())
-  .pipe('skills-context', skillsContext())
-  .pipe('session-context', sessionContext())
+const promptBuilder = createPromptBuilder()
 
 /** POST /chat 请求体：只校验形状（parts 内容由 AI SDK 自行解析） */
 const chatPostSchema = z.object({
@@ -135,33 +95,7 @@ export const chatRoute = new Hono().post(
     // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
     // 文件工具限制在 TOOL_WORKSPACE_DIR 指定的工作区内（默认 <cwd>/workspace），
     // 路径越界一律拒绝；TOOL_WORKSPACE_GUARD=false 可关闭该守卫（仅限本地开发）。
-    const registry = new ToolRegistry()
-    registry.register(
-      weatherTool,
-      calculatorTool,
-      pickSearchTool(),
-      readFileTool,
-      writeFileTool,
-      listDirectoryTool,
-      editFileTool,
-      globTool,
-      grepTool,
-      bashTool,
-      webFetchTool,
-      startPreviewTool,
-      // MCP 外部工具（MCP_SERVERS 未配置时为空数组）——延迟加载，不占初始上下文
-      ...(await getMcpTools()),
-    )
-    // 延迟工具的发现入口：激活后 registry 原地更新 ToolSet，后续步骤立即可用
-    registry.register(createToolSearchTool(registry))
-    // 记忆工具：LLM 在对话中自主触发保存/读取（写库，独占锁）
-    registry.register(createMemoryTool())
-    // 知识库工具：导入工作区文档 + 混合检索（与管理页共用同一 store）
-    registry.register(...createRagTools(ragStore, ragEmbedder))
-    // Skill 工具：系统提示只给索引，模型按需 load 完整指令
-    registry.register(createSkillTool(skillLoader))
-    // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）
-    registry.register(...pluginManager.getTools())
+    const registry = await createDefaultToolRegistry()
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）

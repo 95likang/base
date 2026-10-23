@@ -2,7 +2,6 @@
  * 工具系统汇总导出。
  * 所有内置工具 + 注册表 + MCP 接入统一从这里导入。
  */
-
 export {
   editFileTool,
   globTool,

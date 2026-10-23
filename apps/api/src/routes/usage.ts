@@ -1,4 +1,3 @@
-import { resolve } from 'node:path'
 import type { ModelMessage } from 'ai'
 import { Hono } from 'hono'
 import { microcompact } from '../context/compressor'
@@ -32,13 +31,7 @@ import {
   webFetchTool,
   writeFileTool,
 } from '../tools'
-import { UsageTracker } from '../usage/tracker'
-
-/**
- * 进程级累计用量（跨请求共享）：所有对话步骤的成本记录，
- * 同时落一份 jsonl 审计日志（append-only，路径锚定在 apps/api/.usage/）。
- */
-export const usageLog = new UsageTracker(resolve(import.meta.dirname, '../../.usage/usage.jsonl'))
+import { usageLog } from '../usage'
 
 /**
  * Usage sub-router — 用量与上下文查询（web 端 /context、/usage 面板的数据源）。

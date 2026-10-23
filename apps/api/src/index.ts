@@ -3,8 +3,10 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
+import { channelGateway } from './channels'
 import { onError } from './lib/api-error'
 import { pluginManager } from './plugins'
+import { channelsRoute } from './routes/channels'
 import { chatRoute, chatsRoute } from './routes/chat'
 import { memoryRoute } from './routes/memory'
 import { pluginsRoute } from './routes/plugins'
@@ -43,6 +45,7 @@ const routes = app
   .route('/api/users', usersRoute)
   .route('/api/chats', chatsRoute)
   .route('/api/chat', chatRoute)
+  .route('/api/channels', channelsRoute)
   .route('/api/memory', memoryRoute)
   .route('/api/plugins', pluginsRoute)
   .route('/api/rag', ragRoute)
@@ -64,6 +67,9 @@ serve({ fetch: app.fetch, port }, async (info) => {
       console.log(`  ✗ ${plugin.name} — 加载失败`)
     }
   }
+  // Channel 启动：单个通道失败不影响 API 与其它通道
+  console.log('  启动 Channel...')
+  await channelGateway.startAll()
 })
 
 /**

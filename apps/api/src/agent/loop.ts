@@ -10,6 +10,8 @@ import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
 const MAX_STEPS = 15
 /** 每步 LLM 调用的最大重试次数（429/5xx/网络错误等可重试错误） */
 const MAX_RETRIES = 3
+/** 单次请求的 Token 预算上限（所有步骤累计） */
+export const TOKEN_BUDGET = 200_000
 
 /**
  * Token 预算：由调用方持有（跨轮持续累计），agentLoop 每步成功后累加用量，
