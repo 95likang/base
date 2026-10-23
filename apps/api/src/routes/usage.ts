@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai'
 import { Hono } from 'hono'
+import { config } from '../config/loader'
 import { microcompact } from '../context/compressor'
 import { applyDefense, buildTimestampedMessages, CONTEXT_WINDOW } from '../context/defense'
 import {
@@ -100,7 +101,7 @@ export const usageRoute = new Hono()
       .pipe('session-context', sessionContext())
     const system = promptBuilder.build(promptCtx)
 
-    const modelId = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'
+    const modelId = config.model.name
     const snapshot = buildContextSnapshot({
       modelId,
       windowTokens: CONTEXT_WINDOW,

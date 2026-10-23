@@ -2,6 +2,7 @@ import type { LanguageModel, ModelMessage, ToolSet, UIMessageStreamWriter } from
 import { streamText } from 'ai'
 import { microcompact, summarize } from '../context/compressor'
 import type { TokenTracker } from '../context/defense'
+import type { LocalTraceRecorder } from '../trace/recorder'
 import { normalizeUsage, type UsageTracker } from '../usage/tracker'
 import { createLoopGuard } from './loop-detection'
 import { calculateDelay, isRetryable, retryAfterMs, sleep } from './retry'
@@ -48,6 +49,7 @@ export interface BudgetState {
  * @param usageTracker 可选成本追踪（调用方持有）：每步用 API 真实 usage
  *   规范化成四类 token（input / output / cache 读 / cache 写）后按价格表计价累计。
  * @param chatId 可选会话 id：写入成本记录，供按会话查询用量（/api/usage?chatId=）
+ * @param trace 可选本任务 Trace 记录器：每步记录输入上下文、输出、usage 与耗时
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -60,6 +62,7 @@ export async function agentLoop(
   tracker?: TokenTracker,
   usageTracker?: UsageTracker,
   chatId?: string,
+  trace?: LocalTraceRecorder,
 ): Promise<void> {
   // LanguageModel 联合类型含字符串形式（GlobalProviderModelId），两种都取得到 id
   const modelId = typeof model === 'string' ? model : model.modelId
@@ -79,11 +82,17 @@ export async function agentLoop(
     // 重试会以新的消息 id 重新发送，前端会出现重复的文本/工具卡片
     let forwarded = false
     let stepMessages: ModelMessage[] = []
+    // 本步模型输出的文本：拼起来写进 Trace 的 step_completed
+    let stepText = ''
     // warning 提醒暂存：必须等本步消息追加完再注入，否则会插到 assistant/tool 消息之前。
     // 按签名去重：同一循环源只提醒一次，避免连续注入多条近似内容
     const reminders = new Map<string, string>()
     // 步骤开始前的检测历史快照：重试时回滚，避免失败尝试的调用记录污染循环检测
     const guardMark = guard.snapshot()
+
+    // 必须在调用模型之前记录：此时 messages 还没追加本步产生的消息，
+    // 记录下来的才是「模型当时看到的上下文」
+    await trace?.recordStepStarted({ step: steps, system, messages })
 
     // 步骤级重试：包裹整个流消费过程
     for (let attempt = 1; ; attempt++) {
@@ -119,6 +128,7 @@ export async function agentLoop(
               send({ type: 'text-start', id: part.id })
               break
             case 'text-delta':
+              stepText += part.text
               send({ type: 'text-delta', id: part.id, delta: part.text })
               break
             case 'text-end':
@@ -199,19 +209,27 @@ export async function agentLoop(
         stepMessages = (await result.response).messages
         // result.usage 为 SDK 拍平后的形状；provider 未上报时为 undefined
         const usage = await result.usage
+        const normalized = normalizeUsage(usage)
         if (budget) {
           budget.used += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
         }
         // 成本追踪：四类 token 分别计价（cache 命中折扣各模型不同，见 PRICE_TABLE）
         if (usageTracker && usage) {
-          usageTracker.record(modelId, normalizeUsage(usage), chatId)
+          usageTracker.record(modelId, normalized, chatId)
         }
         // 锚定：API 上报的 promptTokens 对应本步发送时的 messages（含 system + 工具 schema）
         if (tracker && usage.inputTokens != null && usage.inputTokens > 0) {
           tracker.updateFromAPI(usage.inputTokens)
         }
+        await trace?.recordStepCompleted({
+          step: steps,
+          text: stepText,
+          outputMessages: stepMessages,
+          usage: normalized,
+        })
         break // 本步成功，跳出重试循环
       } catch (error) {
+        await trace?.recordAttemptError(steps, attempt, error)
         // 三个不重试的条件：已转发过内容 / 重试次数用尽 / 错误类型不可重试（如 400）
         if (forwarded || attempt > MAX_RETRIES || !isRetryable(error)) throw error
 

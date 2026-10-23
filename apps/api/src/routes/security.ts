@@ -2,6 +2,7 @@ import { zValidator } from '@hono/zod-validator'
 import type { Context, Next } from 'hono'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { config } from '../config/loader'
 import { ApiError, validationHook } from '../lib/api-error'
 import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { getRole, hookPipeline, setRole } from '../security'
@@ -10,14 +11,11 @@ import { ROLES } from '../security/roles'
 const roleSchema = z.object({ role: z.enum(ROLES) })
 
 /**
- * 可切换全局角色的邮箱白名单（逗号分隔）。
+ * 可切换全局角色的邮箱白名单（security.adminEmails）。
  * 未配置时不限制——仅在本地/内网使用；对外部署必须配置。
  */
 function isRoleAdmin(email: string | undefined): boolean {
-  const allowlist = (process.env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean)
+  const allowlist = config.security.adminEmails.map((item) => item.toLowerCase())
   return allowlist.length === 0 || allowlist.includes((email ?? '').toLowerCase())
 }
 

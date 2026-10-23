@@ -180,4 +180,8 @@ export class ChannelGateway {
       description: channel.description,
     }))
   }
+
+  has(name: string): boolean {
+    return this.channels.has(name)
+  }
 }

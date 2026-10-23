@@ -3,42 +3,21 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { config } from '../config/loader'
+import type { McpServerConfig } from '../config/schema'
 import type { ToolDefinition } from './registry'
 
 /**
  * MCP 工具接入：通过 stdio transport 连接外部 MCP server，
  * 把远端工具转换为本地 ToolDefinition，经由 ToolRegistry 统一注册。
  *
- * 配置来源：环境变量 MCP_SERVERS（JSON 数组），未配置则不接入任何 server：
+ * 配置来源：super-agent.config.json 的 tools.mcpServers（默认回落到 MCP_SERVERS 环境变量），
+ * 未配置则不接入任何 server：
  *   MCP_SERVERS='[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"ghp_xxx"}}]'
  */
 
-/** 单个 MCP server 的启动配置 */
-interface McpServerConfig {
-  name: string
-  command: string
-  args?: string[]
-  env?: Record<string, string>
-}
-
 /** 连接超时：npx 首次下载 server 包可能较慢，给足余量 */
 const CONNECT_TIMEOUT_MS = 30_000
-
-/**
- * 解析 MCP_SERVERS 环境变量；未设置或格式非法时返回空列表（记日志，不阻断启动）。
- */
-function parseServerConfigs(): McpServerConfig[] {
-  const raw = process.env.MCP_SERVERS
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) throw new Error('MCP_SERVERS 必须是 JSON 数组')
-    return parsed as McpServerConfig[]
-  } catch (err) {
-    console.error('[mcp] MCP_SERVERS 解析失败，忽略 MCP 配置:', err)
-    return []
-  }
-}
 
 /**
  * Windows 下 spawn 无法直接执行 .cmd/.bat 脚本（如 npx），统一经 cmd /c 包装。
@@ -130,10 +109,10 @@ let mcpToolsPromise: Promise<ToolDefinition[]> | undefined
 /** 已连接的 MCP client（用于进程退出时清理子进程，避免 tsx watch 重启遗留 npx 进程） */
 const clients: Client[] = []
 
-/** 获取所有 MCP server 的工具（合并结果）。未配置 MCP_SERVERS 时返回空数组。 */
+/** 获取所有 MCP server 的工具（合并结果）。未配置 tools.mcpServers 时返回空数组。 */
 export function getMcpTools(): Promise<ToolDefinition[]> {
   mcpToolsPromise ??= (async () => {
-    const configs = parseServerConfigs()
+    const configs = config.tools.mcpServers
     if (configs.length === 0) return []
     const toolGroups = await Promise.all(configs.map(loadServerTools))
     const tools = toolGroups.flat()

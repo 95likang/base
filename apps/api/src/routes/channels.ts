@@ -38,6 +38,14 @@ export const channelsRoute = new Hono()
     requireSession,
     zValidator('json', testSchema, validationHook),
     async (c) => {
+      // 配置关闭飞书时通道不会注册，明确返回 409 而不是“未注册的通道”内部错误
+      if (!channelGateway.has('feishu')) {
+        throw new ApiError(
+          'CHANNEL_DISABLED',
+          '飞书通道未启用（channels.feishu.enabled=false）',
+          409,
+        )
+      }
       const { text } = c.req.valid('json')
       const reply = await channelGateway.dispatch('feishu', { ...WEB_TEST, text }, false)
       return c.json({ reply })

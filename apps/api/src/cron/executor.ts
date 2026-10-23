@@ -1,13 +1,11 @@
 import type { ModelMessage, UIMessageStreamWriter } from 'ai'
 import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
-import { anthropic } from '../agent/model'
+import { defaultModel } from '../agent/model'
+import { config } from '../config/loader'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
 import { createDefaultToolRegistry } from '../tools/default-registry'
 import { usageLog } from '../usage'
 import { cronService } from './index'
-
-// 执行器在导入期读取 ANTHROPIC_*，显式加载 .env，不依赖其他模块的副作用顺序
-process.loadEnvFile?.()
 
 /**
  * 启动调度器并注入 Agent 执行器。
@@ -25,7 +23,7 @@ export async function startCron(): Promise<void> {
   }
   cronService.setExecutor({
     runAgentPrompt: async (prompt, timeout = 60_000) => {
-      const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
+      const model = defaultModel
       const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
       const registry = await createDefaultToolRegistry({ budget })
       const messages: ModelMessage[] = [{ role: 'user', content: prompt }]
@@ -71,5 +69,10 @@ export async function startCron(): Promise<void> {
       console.log(`\n${message}`)
     },
   })
+  // cron.enabled=false 只关闭自动调度：任务仍会加载、可在管理页手动运行
+  if (!config.cron.enabled) {
+    console.log('  Cron 自动调度已关闭（cron.enabled=false）')
+    return
+  }
   cronService.start()
 }

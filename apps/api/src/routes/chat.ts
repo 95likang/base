@@ -4,7 +4,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
-import { anthropic } from '../agent/model'
+import { defaultModel } from '../agent/model'
 import { microcompact, summarize } from '../context/compressor'
 import {
   applyDefense,
@@ -28,6 +28,7 @@ import {
 } from '../session/store'
 import { skillLoader } from '../skills'
 import { createDefaultToolRegistry } from '../tools/default-registry'
+import { LocalTraceRecorder } from '../trace/recorder'
 import { usageLog } from '../usage'
 
 /** 系统提示管道：模块级单例（build 为纯函数，无请求级状态，可跨请求复用） */
@@ -91,7 +92,7 @@ export const chatRoute = new Hono().post(
       await saveUserMessage(target, lastUser)
     }
 
-    const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
+    const model = defaultModel
     // 请求级 Token 预算：所有步骤累计，子 Agent 的消耗也计入同一个上限
     const budget: BudgetState = { used: 0, limit: TOKEN_BUDGET }
     // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
@@ -167,19 +168,38 @@ export const chatRoute = new Hono().post(
       // 提供 originalMessages：流会为回复消息生成 id，onEnd 能拿到完整消息列表
       originalMessages: messages,
       execute: async ({ writer }) => {
-        // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token
-        await agentLoop(
-          model,
-          tools,
-          llmMessages,
-          system,
-          writer,
-          c.req.raw.signal,
-          budget,
-          tracker,
-          usageLog,
-          chatId,
-        )
+        // 一次用户任务一条 Trace：记录每个 Step 的上下文、输出、usage 与耗时。
+        // Trace 只是观测手段，创建失败时降级为不记录，不影响本次对话
+        const trace = await LocalTraceRecorder.start({
+          sessionId: chatId,
+          model: model.modelId,
+        }).catch((error: unknown) => {
+          console.warn(
+            `  [Trace] 创建失败，本次不记录: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return undefined
+        })
+        try {
+          // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token
+          await agentLoop(
+            model,
+            tools,
+            llmMessages,
+            system,
+            writer,
+            c.req.raw.signal,
+            budget,
+            tracker,
+            usageLog,
+            chatId,
+            trace,
+          )
+          await trace?.finish(c.req.raw.signal.aborted ? 'cancelled' : 'completed')
+          if (trace) console.log(`  [Trace] ${trace.filePath}`)
+        } catch (error) {
+          await trace?.finish(c.req.raw.signal.aborted ? 'cancelled' : 'failed', error)
+          throw error
+        }
         // 成本记录在 agentLoop 内按步写入 usageLog；
         // 展示走 web 面板（/context、/usage 命令 → /api/usage/*）
       },

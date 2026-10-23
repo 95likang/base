@@ -13,11 +13,14 @@ let root: string
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'fs-tools-'))
   process.env.TOOL_WORKSPACE_DIR = root
+  // .env 里通常为本地开发关了守卫，这里显式开启以验证默认防御行为
+  process.env.TOOL_WORKSPACE_GUARD = 'true'
 })
 
 afterAll(async () => {
   await fs.rm(root, { recursive: true, force: true })
   delete process.env.TOOL_WORKSPACE_DIR
+  delete process.env.TOOL_WORKSPACE_GUARD
 })
 
 // 模块级常量在 import 时求值，放到用例内 import 才能拿到上面设置的 env
@@ -57,9 +60,11 @@ describe('文件工具冒烟', () => {
     await expect(readFile.execute({ path: '../escape.txt' }, {})).rejects.toThrow('路径越界')
   })
 
-  it('TOOL_WORKSPACE_GUARD=false 时关闭越界检查', async () => {
-    // 守卫开关是模块级常量，需重置模块缓存后重新 import 才能读到新 env
-    process.env.TOOL_WORKSPACE_GUARD = 'false'
+  it('tools.guard=false 时关闭越界检查', async () => {
+    // 守卫开关来自配置系统（配置文件优先于 env），mock 配置模块以覆盖 guard=false 分支
+    vi.doMock('../config/loader', () => ({
+      config: { tools: { workspaceDir: root, guard: false } },
+    }))
     vi.resetModules()
     try {
       const mod = await import('./file-tools')
@@ -69,7 +74,7 @@ describe('文件工具冒烟', () => {
       const out = await mod.readFileTool.execute({ path: `../${path.basename(outside)}` }, {})
       expect(out).toBe('outside content')
     } finally {
-      delete process.env.TOOL_WORKSPACE_GUARD
+      vi.doUnmock('../config/loader')
       vi.resetModules()
     }
   })

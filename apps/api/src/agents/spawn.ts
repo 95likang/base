@@ -1,7 +1,7 @@
 import type { ModelMessage } from 'ai'
 import { streamText } from 'ai'
 import type { BudgetState } from '../agent/loop'
-import { anthropic } from '../agent/model'
+import { defaultModel } from '../agent/model'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
 import type { ToolRegistry } from '../tools/registry'
 import { createToolSearchTool } from '../tools/tool-search'
@@ -123,8 +123,8 @@ export async function spawnAgent(
     const system =
       (await buildRuntimeSystem(subRegistry, 'sub-agent', messages.length)) +
       SUB_AGENT_SYSTEM_SUFFIX
-    const model = anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5')
-    const modelId = typeof model === 'string' ? model : model.modelId
+    const model = defaultModel
+    const modelId = model.modelId
 
     let step = 0
     let usedTokens = 0

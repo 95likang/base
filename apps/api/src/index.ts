@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth } from './auth'
 import { channelGateway } from './channels'
+import { config } from './config/loader'
 import { startCron } from './cron/executor'
 import { onError } from './lib/api-error'
 import { pluginManager } from './plugins'
@@ -20,13 +21,6 @@ import { usageRoute } from './routes/usage'
 import { usersRoute } from './routes/users'
 import { getMcpTools } from './tools'
 
-process.loadEnvFile?.()
-
-const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3001')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean)
-
 const app = new Hono()
 
 app.use('*', logger())
@@ -35,7 +29,7 @@ app.onError(onError)
 app.use(
   '/api/*',
   cors({
-    origin: corsOrigins,
+    origin: config.server.corsOrigins,
     credentials: true,
   }),
 )
@@ -59,25 +53,37 @@ const routes = app
   .route('/api/skills', skillsRoute)
   .route('/api/usage', usageRoute)
 
-const port = Number(process.env.PORT ?? 3000)
+const port = config.server.port
 serve({ fetch: app.fetch, port }, async (info) => {
   console.log(`🚀 API listening on http://localhost:${info.port}`)
   // MCP 预热：启动时后台连接（不阻塞监听），首个对话请求不再承担 npx 拉起子进程的耗时
   void getMcpTools()
-  // 插件自动加载：单个插件失败不影响启动与其它插件
+  // 插件按配置加载：空列表视为未配置，加载全部；enabled=false 的跳过
   console.log('  加载插件...')
-  for (const plugin of pluginManager.list()) {
+  const pluginConfigs =
+    config.plugins.length > 0
+      ? config.plugins
+      : pluginManager.list().map((plugin) => ({ name: plugin.name, enabled: true }))
+  for (const pluginCfg of pluginConfigs) {
+    if (!pluginManager.has(pluginCfg.name)) {
+      console.log(`  ✗ ${pluginCfg.name} — 未知插件`)
+      continue
+    }
+    if (!pluginCfg.enabled) {
+      console.log(`  - ${pluginCfg.name} — 已禁用`)
+      continue
+    }
     try {
-      const tools = await pluginManager.load(plugin.name)
-      console.log(`  ✓ ${plugin.name} — ${tools.length} 个工具`)
+      const tools = await pluginManager.load(pluginCfg.name)
+      console.log(`  ✓ ${pluginCfg.name} — ${tools.length} 个工具`)
     } catch {
-      console.log(`  ✗ ${plugin.name} — 加载失败`)
+      console.log(`  ✗ ${pluginCfg.name} — 加载失败`)
     }
   }
   // Channel 启动：单个通道失败不影响 API 与其它通道
   console.log('  启动 Channel...')
   await channelGateway.startAll()
-  // Cron 调度：从数据库恢复任务并注入 Agent 执行器（逾期的一次性任务会立即补跑）
+  // Cron：从数据库恢复任务并注入 Agent 执行器（逾期的一次性任务会立即补跑）
   await startCron()
 })
 

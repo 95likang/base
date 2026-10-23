@@ -6,8 +6,10 @@ dist
 *.tsbuildinfo
 .env
 .env.local
+super-agent.config.json
 .DS_Store
 coverage
 drizzle/meta
 workspace/
 .usage/
+.traces/

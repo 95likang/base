@@ -1,7 +1,9 @@
 /**
  * 向量化：Embedder 携带模型名（持久化时标记向量来源，不同模型的向量不可比较）。
- * 使用 DashScope compatible-mode；DASHSCOPE_API_KEY 缺失时启动直接报错。
+ * 使用 DashScope compatible-mode；rag.apiKey（默认 DASHSCOPE_API_KEY）缺失时启动直接报错。
  */
+import { config } from '../config/loader'
+
 type EmbeddingFn = (texts: string[]) => Promise<number[][]>
 
 export interface Embedder {
@@ -44,11 +46,11 @@ function createDashScopeEmbedder(apiKey: string): Embedder {
   }
 }
 
-export function createEmbedderFromEnv(): Embedder {
-  const apiKey = process.env.DASHSCOPE_API_KEY
+export function createEmbedder(): Embedder {
+  const apiKey = config.rag.apiKey
   if (!apiKey) {
     throw new Error(
-      'DASHSCOPE_API_KEY is not set. Copy apps/api/.env.example to .env and fill it in.',
+      'DASHSCOPE_API_KEY is not set. Copy apps/api/.env.example to .env and fill it in (or set rag.apiKey in super-agent.config.json).',
     )
   }
   return createDashScopeEmbedder(apiKey)

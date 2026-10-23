@@ -1,24 +1,25 @@
-import { anthropic } from '../agent/model'
+import { defaultModel } from '../agent/model'
+import { config } from '../config/loader'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
 import { createDefaultToolRegistry } from '../tools/default-registry'
 import { usageLog } from '../usage'
 import { FeishuChannel } from './feishu'
 import { ChannelGateway } from './gateway'
 
-// 本模块在导入期读取 ANTHROPIC_MODEL / FEISHU_*，显式加载 .env，不依赖其他模块的副作用顺序
-process.loadEnvFile?.()
-
 /** 进程级单例：/api/channels 路由与启动流程共用 */
 export const channelGateway = new ChannelGateway({
-  model: anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'),
+  model: defaultModel,
   createRegistry: createDefaultToolRegistry,
   buildSystem: buildRuntimeSystem,
   usageTracker: usageLog,
 })
 
-channelGateway.register(
-  new FeishuChannel({
-    appId: process.env.FEISHU_APP_ID ?? '',
-    appSecret: process.env.FEISHU_APP_SECRET ?? '',
-  }),
-)
+// 配置里 enabled=false 时完全不创建实例、不建立长连接
+if (config.channels.feishu.enabled) {
+  channelGateway.register(
+    new FeishuChannel({
+      appId: config.channels.feishu.appId,
+      appSecret: config.channels.feishu.appSecret,
+    }),
+  )
+}

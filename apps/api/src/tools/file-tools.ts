@@ -1,19 +1,18 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
 import fg from 'fast-glob'
+import { config } from '../config/loader'
 import type { ToolDefinition } from './registry'
 
 /** 工作区根目录：文件工具只能访问其中的相对路径（导出给其他工具复用，如预览服务器） */
-export const WORKSPACE_ROOT = resolvePath(
-  process.env.TOOL_WORKSPACE_DIR ?? join(process.cwd(), 'workspace'),
-)
+export const WORKSPACE_ROOT = resolvePath(config.tools.workspaceDir)
 
 /**
- * 工作区守卫开关：TOOL_WORKSPACE_GUARD=false 时关闭越界检查，
+ * 工作区守卫开关：tools.guard=false 时关闭越界检查，
  * resolveWorkspacePath() 退化为普通路径解析（相对 WORKSPACE_ROOT，绝对路径直接放行）。
  * 默认开启；关闭后模型可访问服务器任意路径，仅限本地开发使用。
  */
-const GUARD_ENABLED = process.env.TOOL_WORKSPACE_GUARD !== 'false'
+const GUARD_ENABLED = config.tools.guard
 
 /** 解析为工作区内的绝对路径；越界（../、绝对路径、其他盘符）直接抛错 */
 export function resolveWorkspacePath(userPath: string): string {

@@ -3,6 +3,7 @@ import type { Server } from 'node:http'
 import { createServer } from 'node:http'
 import { extname, join, sep } from 'node:path'
 import TurndownService from 'turndown'
+import { config } from '../config/loader'
 import { WORKSPACE_ROOT } from './file-tools'
 import type { ToolDefinition, ToolExecuteOptions } from './registry'
 
@@ -36,8 +37,8 @@ export const tavilySearchTool: ToolDefinition = {
     { query, max_results = 5 }: { query: string; max_results?: number },
     { abortSignal }: ToolExecuteOptions,
   ) => {
-    const apiKey = process.env.TAVILY_API_KEY
-    if (!apiKey) return '[web_search] 未配置 TAVILY_API_KEY，请在 .env 中设置'
+    const apiKey = config.tools.tavilyApiKey
+    if (!apiKey) return '[web_search] 未配置 Tavily API Key（TAVILY_API_KEY 或 tools.tavilyApiKey）'
 
     try {
       const res = await fetch('https://api.tavily.com/search', {
@@ -100,8 +101,8 @@ export const serperSearchTool: ToolDefinition = {
     { query, max_results = 5 }: { query: string; max_results?: number },
     { abortSignal }: ToolExecuteOptions,
   ) => {
-    const apiKey = process.env.SERPER_API_KEY
-    if (!apiKey) return '[web_search] 未配置 SERPER_API_KEY，请在 .env 中设置'
+    const apiKey = config.tools.serperApiKey
+    if (!apiKey) return '[web_search] 未配置 Serper API Key（SERPER_API_KEY 或 tools.serperApiKey）'
 
     try {
       const res = await fetch('https://google.serper.dev/search', {
@@ -147,11 +148,11 @@ export const serperSearchTool: ToolDefinition = {
   },
 }
 
-// ── 根据环境变量选择搜索后端 ──────────────────────────────
+// ── 根据配置选择搜索后端 ──────────────────────────────
 
 export function pickSearchTool(): ToolDefinition {
-  if (process.env.TAVILY_API_KEY) return tavilySearchTool
-  if (process.env.SERPER_API_KEY) return serperSearchTool
+  if (config.tools.tavilyApiKey) return tavilySearchTool
+  if (config.tools.serperApiKey) return serperSearchTool
   // 都没配就返回 tavily 版（会提示配置 API Key）
   return tavilySearchTool
 }
