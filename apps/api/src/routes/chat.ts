@@ -15,6 +15,7 @@ import {
 import { createPromptBuilder, type PromptContext } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
 import { listActiveMemories } from '../memory/store'
+import { withTraceAttributes } from '../observability'
 import { ragStore } from '../rag/service'
 import {
   createChat,
@@ -180,19 +181,28 @@ export const chatRoute = new Hono().post(
           return undefined
         })
         try {
-          // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token
-          await agentLoop(
-            model,
-            tools,
-            llmMessages,
-            system,
-            writer,
-            c.req.raw.signal,
-            budget,
-            tracker,
-            usageLog,
-            chatId,
-            trace,
+          // 客户端断开/取消时中止循环，避免后续 LLM 调用白烧 token。
+          // Langfuse trace 属性挂在整个 agentLoop 外层：step/tool span 自动归属本次请求
+          await withTraceAttributes(
+            {
+              traceName: 'chat',
+              sessionId: chatId,
+              ...(trace ? { metadata: { localTraceFile: trace.filePath } } : {}),
+            },
+            () =>
+              agentLoop(
+                model,
+                tools,
+                llmMessages,
+                system,
+                writer,
+                c.req.raw.signal,
+                budget,
+                tracker,
+                usageLog,
+                chatId,
+                trace,
+              ),
           )
           await trace?.finish(c.req.raw.signal.aborted ? 'cancelled' : 'completed')
           if (trace) console.log(`  [Trace] ${trace.filePath}`)

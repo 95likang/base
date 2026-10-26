@@ -1,3 +1,4 @@
+import { startActiveObservation } from '@langfuse/tracing'
 import type { ModelMessage } from 'ai'
 import { streamText } from 'ai'
 import type { BudgetState } from '../agent/loop'
@@ -114,115 +115,121 @@ export async function spawnAgent(
   // 当前步骤已流式产出的文本：中断时作为部分结果回传
   let pendingText = ''
 
-  try {
-    // fork：复制工具定义与安全配置，锁状态独立——否则父 Agent 持有独占锁时子 Agent 会死锁。
-    // tool_search 必须重新绑定到 fork 后的注册表，否则它会去激活父注册表里的工具。
-    const subRegistry = ctx.registry.fork({ exclude: EXCLUDED_TOOLS })
-    subRegistry.register(createToolSearchTool(subRegistry))
-    const tools = subRegistry.toAISDKFormat()
-    const system =
-      (await buildRuntimeSystem(subRegistry, 'sub-agent', messages.length)) +
-      SUB_AGENT_SYSTEM_SUFFIX
-    const model = defaultModel
-    const modelId = model.modelId
+  // 子 Agent 是并发执行的独立任务：显式开一层 span，让内部的模型/工具 span 挂在它下面
+  return startActiveObservation(`sub-agent:${runId}`, async (span) => {
+    span.update({ input: request.task })
+    let output: string
+    try {
+      // fork：复制工具定义与安全配置，锁状态独立——否则父 Agent 持有独占锁时子 Agent 会死锁。
+      // tool_search 必须重新绑定到 fork 后的注册表，否则它会去激活父注册表里的工具。
+      const subRegistry = ctx.registry.fork({ exclude: EXCLUDED_TOOLS })
+      subRegistry.register(createToolSearchTool(subRegistry))
+      const tools = subRegistry.toAISDKFormat()
+      const system =
+        (await buildRuntimeSystem(subRegistry, 'sub-agent', messages.length)) +
+        SUB_AGENT_SYSTEM_SUFFIX
+      const model = defaultModel
+      const modelId = model.modelId
 
-    let step = 0
-    let usedTokens = 0
-    let stopReason: 'budget' | 'token-cap' | undefined
-    while (step < MAX_STEPS) {
-      step++
-      const isLastStep = step === MAX_STEPS
-      console.log(`  ${tag} Step ${step}/${MAX_STEPS}${isLastStep ? ' (总结)' : ''}`)
-      if (isLastStep) {
-        messages.push({
-          role: 'user',
-          content: '你已经收集了足够的信息。请直接输出文字总结，不要再调用任何工具。',
-        })
-      }
-
-      const result = streamText({
-        model,
-        system,
-        tools,
-        toolChoice: isLastStep ? 'none' : 'auto',
-        messages,
-        // 子 Agent 不向前端转发内容，SDK 重试不会造成重复输出，交给 SDK 兜底 429/5xx
-        maxRetries: 2,
-        abortSignal: controller.signal,
-      })
-
-      let hasToolCall = false
-      pendingText = ''
-      for await (const part of result.fullStream) {
-        if (part.type === 'tool-call') {
-          hasToolCall = true
-          const preview = JSON.stringify(part.input).slice(0, 80)
-          console.log(`  ${tag} 调用 ${part.toolName}(${preview})`)
-        } else if (part.type === 'text-delta') {
-          pendingText += part.text
-        } else if (part.type === 'error') {
-          throw part.error
+      let step = 0
+      let usedTokens = 0
+      let stopReason: 'budget' | 'token-cap' | undefined
+      while (step < MAX_STEPS) {
+        step++
+        const isLastStep = step === MAX_STEPS
+        console.log(`  ${tag} Step ${step}/${MAX_STEPS}${isLastStep ? ' (总结)' : ''}`)
+        if (isLastStep) {
+          messages.push({
+            role: 'user',
+            content: '你已经收集了足够的信息。请直接输出文字总结，不要再调用任何工具。',
+          })
         }
-      }
 
-      const response = await result.response
-      messages.push(...response.messages)
+        const result = streamText({
+          model,
+          system,
+          tools,
+          toolChoice: isLastStep ? 'none' : 'auto',
+          messages,
+          // 子 Agent 不向前端转发内容，SDK 重试不会造成重复输出，交给 SDK 兜底 429/5xx
+          maxRetries: 2,
+          abortSignal: controller.signal,
+        })
 
-      // 成本按 'sub-agent' 归类写入 usageLog，并同步计入父循环的预算
-      const usage = await result.usage
-      if (usage) {
-        const stepTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
-        usedTokens += stepTokens
-        if (ctx.budget) ctx.budget.used += stepTokens
-        usageLog.record(modelId, normalizeUsage(usage), 'sub-agent')
-      }
+        let hasToolCall = false
+        pendingText = ''
+        for await (const part of result.fullStream) {
+          if (part.type === 'tool-call') {
+            hasToolCall = true
+            const preview = JSON.stringify(part.input).slice(0, 80)
+            console.log(`  ${tag} 调用 ${part.toolName}(${preview})`)
+          } else if (part.type === 'text-delta') {
+            pendingText += part.text
+          } else if (part.type === 'error') {
+            throw part.error
+          }
+        }
 
-      if (!hasToolCall) break
-      if (ctx.budget) {
-        if (ctx.budget.used > ctx.budget.limit) {
-          stopReason = 'budget'
-          console.log(
-            `  ${tag} 父请求预算已用尽 (${ctx.budget.used}/${ctx.budget.limit})，提前结束`,
-          )
+        const response = await result.response
+        messages.push(...response.messages)
+
+        // 成本按 'sub-agent' 归类写入 usageLog，并同步计入父循环的预算
+        const usage = await result.usage
+        if (usage) {
+          const stepTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+          usedTokens += stepTokens
+          if (ctx.budget) ctx.budget.used += stepTokens
+          usageLog.record(modelId, normalizeUsage(usage), 'sub-agent')
+        }
+
+        if (!hasToolCall) break
+        if (ctx.budget) {
+          if (ctx.budget.used > ctx.budget.limit) {
+            stopReason = 'budget'
+            console.log(
+              `  ${tag} 父请求预算已用尽 (${ctx.budget.used}/${ctx.budget.limit})，提前结束`,
+            )
+            break
+          }
+        } else if (usedTokens > FALLBACK_TOKEN_CAP) {
+          stopReason = 'token-cap'
+          console.log(`  ${tag} Token ${usedTokens} 超过兜底上限 ${FALLBACK_TOKEN_CAP}，提前结束`)
           break
         }
-      } else if (usedTokens > FALLBACK_TOKEN_CAP) {
-        stopReason = 'token-cap'
-        console.log(`  ${tag} Token ${usedTokens} 超过兜底上限 ${FALLBACK_TOKEN_CAP}，提前结束`)
-        break
       }
+
+      // 被动中断时最后一条 assistant 消息往往只是「接下来我要做什么」的叙述，必须明确标记未完成，
+      // 否则父 Agent 会把叙述当成结论
+      const text = lastAssistantText(messages) || '(无输出)'
+      const result = stopReason
+        ? `[未完成：${stopReason === 'budget' ? '本次请求 token 预算已用尽' : '达到单次 token 上限'}] 最后进展：${text}`
+        : text
+      ctx.agentRegistry.complete(runId, result)
+      console.log(`  ${tag} 完成 ✓ (${step} 步, ${result.length} 字符)`)
+      output = result
+    } catch (err) {
+      const cancelled = ctx.signal?.aborted === true
+      const aborted = cancelled || timedOut
+      const message = cancelled
+        ? '已取消：父请求中断'
+        : timedOut
+          ? `执行超时 (${timeout / 1000}s)`
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      ctx.agentRegistry.fail(runId, message, timedOut ? 'timeout' : 'error')
+      console.log(`  ${tag} ${aborted ? '中断' : '失败'} ✗: ${message}`)
+
+      // 中断时保留已产出的文本，不至于完全白跑
+      const partial = pendingText.trim() || lastAssistantText(messages)
+      output = aborted && partial ? `[部分结果] ${partial}` : `[sub-agent 执行失败] ${message}`
+    } finally {
+      clearTimeout(timer)
+      ctx.signal?.removeEventListener('abort', onParentAbort)
     }
-
-    // 被动中断时最后一条 assistant 消息往往只是「接下来我要做什么」的叙述，必须明确标记未完成，
-    // 否则父 Agent 会把叙述当成结论
-    const text = lastAssistantText(messages) || '(无输出)'
-    const result = stopReason
-      ? `[未完成：${stopReason === 'budget' ? '本次请求 token 预算已用尽' : '达到单次 token 上限'}] 最后进展：${text}`
-      : text
-    ctx.agentRegistry.complete(runId, result)
-    console.log(`  ${tag} 完成 ✓ (${step} 步, ${result.length} 字符)`)
-    return result
-  } catch (err) {
-    const cancelled = ctx.signal?.aborted === true
-    const aborted = cancelled || timedOut
-    const message = cancelled
-      ? '已取消：父请求中断'
-      : timedOut
-        ? `执行超时 (${timeout / 1000}s)`
-        : err instanceof Error
-          ? err.message
-          : String(err)
-    ctx.agentRegistry.fail(runId, message, timedOut ? 'timeout' : 'error')
-    console.log(`  ${tag} ${aborted ? '中断' : '失败'} ✗: ${message}`)
-
-    // 中断时保留已产出的文本，不至于完全白跑
-    const partial = pendingText.trim() || lastAssistantText(messages)
-    if (aborted && partial) return `[部分结果] ${partial}`
-    return `[sub-agent 执行失败] ${message}`
-  } finally {
-    clearTimeout(timer)
-    ctx.signal?.removeEventListener('abort', onParentAbort)
-  }
+    span.update({ output })
+    return output
+  })
 }
 
 /** 并行执行多个子 Agent；超过并发额度的任务在注册表中排队，而不是被拒绝 */

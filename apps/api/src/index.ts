@@ -7,6 +7,7 @@ import { channelGateway } from './channels'
 import { config } from './config/loader'
 import { startCron } from './cron/executor'
 import { onError } from './lib/api-error'
+import { flushObservability } from './observability'
 import { pluginManager } from './plugins'
 import { agentsRoute } from './routes/agents'
 import { channelsRoute } from './routes/channels'
@@ -92,3 +93,11 @@ serve({ fetch: app.fetch, port }, async (info) => {
  * type and feed it to `hc<AppType>()` to get a fully typed RPC client.
  */
 export type AppType = typeof routes
+
+// 退出前 flush Langfuse 缓冲区：长驻服务靠后台批量上报，不 flush 会丢最后一批。
+// Windows 上信号处理器不一定执行，属于尽力而为，失败也不阻塞退出。
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void flushObservability()
+  })
+}

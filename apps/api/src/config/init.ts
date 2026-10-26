@@ -56,6 +56,8 @@ export async function runInit(): Promise<void> {
 
   const enableCron = (await ask('\n  启用 Cron 定时任务? (y/N): ')).trim().toLowerCase() !== 'n'
 
+  const enableLangfuse = (await ask('\n  启用 Langfuse 追踪? (y/N): ')).trim().toLowerCase() === 'y'
+
   const fileConfig = {
     server: {
       port: 3000,
@@ -93,6 +95,15 @@ export async function runInit(): Promise<void> {
     security: { adminEmails: [] },
     cron: { enabled: enableCron },
     usage: { trackingFile: '.usage/usage.jsonl' },
+    observability: enableLangfuse
+      ? {
+          enabled: true,
+          // baseUrl 非密钥：写默认区域地址，避免把可选配置变成对环境变量的硬依赖
+          baseUrl: 'https://jp.cloud.langfuse.com',
+          publicKey: env('LANGFUSE_PUBLIC_KEY'),
+          secretKey: env('LANGFUSE_SECRET_KEY'),
+        }
+      : { enabled: false },
   }
 
   writeFileSync(CONFIG_FILE, `${JSON.stringify(fileConfig, null, 2)}\n`)

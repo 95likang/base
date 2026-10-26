@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { ModelMessage } from 'ai'
 import type { StepUsage } from '../usage/tracker'
+import { redactSensitive } from './mask'
 
 type TraceStatus = 'completed' | 'failed' | 'cancelled'
 
@@ -23,23 +24,6 @@ interface StepCompletedInput {
   text: string
   outputMessages: ModelMessage[]
   usage: StepUsage
-}
-
-const SECRET_KEY = /api[-_]?key|token(?!s)|secret|password|authorization/i
-
-/** 按字段名递归脱敏：上下文里可能夹带 API Key / Token / 密码 */
-function sanitize(value: unknown, key = ''): unknown {
-  if (SECRET_KEY.test(key)) return '[REDACTED]'
-  if (Array.isArray(value)) return value.map((item) => sanitize(item))
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
-        childKey,
-        sanitize(childValue, childKey),
-      ]),
-    )
-  }
-  return value
 }
 
 function safeName(value: string): string {
@@ -90,7 +74,7 @@ export class LocalTraceRecorder {
       traceId: this.traceId,
       timestamp: new Date().toISOString(),
       step: input.step,
-      context: sanitize({ system: input.system, messages: input.messages }),
+      context: redactSensitive({ system: input.system, messages: input.messages }),
     })
   }
 
@@ -112,7 +96,7 @@ export class LocalTraceRecorder {
       timestamp: new Date().toISOString(),
       step: input.step,
       durationMs: this.stepStartedAt === 0 ? 0 : Date.now() - this.stepStartedAt,
-      output: sanitize({ text: input.text, messages: input.outputMessages }),
+      output: redactSensitive({ text: input.text, messages: input.outputMessages }),
       usage: input.usage,
     })
   }

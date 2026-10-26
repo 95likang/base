@@ -118,6 +118,14 @@ const RagConfigSchema = z.object({
   apiKey: z.string().default(() => process.env.DASHSCOPE_API_KEY ?? ''),
 })
 
+const ObservabilityConfigSchema = z.object({
+  /** 总开关；publicKey/secretKey 缺失时仍会自动跳过（fail-open） */
+  enabled: z.boolean().default(true),
+  baseUrl: z.string().default(() => process.env.LANGFUSE_BASE_URL ?? ''),
+  publicKey: z.string().default(() => process.env.LANGFUSE_PUBLIC_KEY ?? ''),
+  secretKey: z.string().default(() => process.env.LANGFUSE_SECRET_KEY ?? ''),
+})
+
 export const SuperAgentConfigSchema = z.object({
   model: ModelConfigSchema.prefault({}),
   /** 空数组表示未配置：启动时加载全部可用插件 */
@@ -132,6 +140,7 @@ export const SuperAgentConfigSchema = z.object({
   auth: AuthConfigSchema.prefault({}),
   tools: ToolsConfigSchema.prefault({}),
   rag: RagConfigSchema.prefault({}),
+  observability: ObservabilityConfigSchema.prefault({}),
 })
 
 export type SuperAgentConfig = z.infer<typeof SuperAgentConfigSchema>

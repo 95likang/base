@@ -20,4 +20,6 @@
 - glob 工具能列出工作区外的文件 → fast-glob 对绝对路径模式会忽略 `cwd`（文档化行为），只校验 path 参数拦不住 pattern → glob 工具必须自行校验 pattern（`isAbsolute`、盘符前缀 `C:`、`..` 段），否则工作区守卫被绕过。
 - LLM 触发的 bash 工具执行期间整个 API 无响应 → `execSync` 同步阻塞事件循环，命令跑多久所有请求就挂多久 → 用 `promisify(exec)` 异步执行，并透传 `abortSignal` 让客户端断开时能 kill 命令。
 - Windows 上 tsx watch 重启后偶发遗留 MCP stdio 子进程（npx）→ Windows 无真实 POSIX 信号，强杀/重启时 `SIGINT`/`SIGTERM` 处理器不执行，`client.close()` 清理代码跑不到 → 依赖 MCP server 子进程监听 stdin 断开自动退出；仍遗留时用 `taskkill /F /PID <pid>` 手动清理（与 tsx 遗留进程同源，可用 `Get-Process node,npx` 排查）。
+- 并发跑两个 `pnpm add` 后 `package.json` 丢失新装依赖 → 两个 pnpm 进程同时改写同一 `package.json` / `pnpm-lock.yaml`，后写入者覆盖 → 同一 workspace 的依赖安装必须串行，等上一个进程结束再执行下一个。
+- 安装 `@langfuse/otel` 报 peer 冲突（`@opentelemetry/core` 3.0.0 vs `^2.0.1`、`api` 1.10.0 vs `<1.10.0`）→ 最新 `@opentelemetry/sdk-node@0.300` 依赖 core 3.x，与 Langfuse 6.0.2 的 peer 不兼容 → 固定 `@opentelemetry/sdk-node@0.211.0` 与 `@opentelemetry/api@1.9.1`。
 
