@@ -1,10 +1,18 @@
 'use client'
 
 import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport, type UIMessage } from 'ai'
+import { DefaultChatTransport, type FileUIPart, type UIMessage } from 'ai'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { type FormEvent, Suspense, useCallback, useEffect, useState } from 'react'
+import {
+  type ClipboardEvent,
+  type FormEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { contextCommand } from './commands/context'
 import { dreamCommand, lintCommand, memoryCommand } from './commands/memory'
 import {
@@ -48,6 +56,33 @@ function createChatOnce(): Promise<string> {
       })
   }
   return creatingChat
+}
+
+/** 图片长边降采样上限（Anthropic 推荐值），控制 data URL / DB / 每轮重放历史的体积 */
+const MAX_IMAGE_EDGE = 1568
+
+/** 单条消息图片数上限：data URL 随全量历史每轮重放并落库，需控制体积 */
+const MAX_IMAGES = 8
+
+/** File → FileUIPart：canvas 降采样 + 转 JPEG data URL（透明区垫白，GIF 取首帧） */
+async function fileToImagePart(file: File): Promise<FileUIPart> {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建画布')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  return {
+    type: 'file',
+    mediaType: 'image/jpeg',
+    filename: file.name,
+    url: canvas.toDataURL('image/jpeg', 0.85),
+  }
 }
 
 /** LLM 流式对话 demo：会话列表 + 历史持久化（存 PG），直接请求 Hono API。 */
@@ -218,24 +253,56 @@ function ChatPanel({
     onFinish: onFinished,
   })
   const [input, setInput] = useState('')
+  // 待发送图片（data URL，可直接预览；sendMessage 接受 FileUIPart[]）
+  const [images, setImages] = useState<FileUIPart[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // 斜杠命令的面板数据（本地展示，不入消息流、不落库）
   const [panel, setPanel] = useState<ChatPanelView | null>(null)
+
+  /** 追加图片：非 image/* 的文件静默忽略；损坏图片跳过并警告，不阻塞其他图片 */
+  const addImages = async (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'))
+    if (imageFiles.length === 0) return
+    const settled = await Promise.allSettled(imageFiles.map(fileToImagePart))
+    const parts = settled
+      .filter((r): r is PromiseFulfilledResult<FileUIPart> => r.status === 'fulfilled')
+      .map((r) => r.value)
+    for (const r of settled) {
+      if (r.status === 'rejected') console.warn('图片转换失败，已跳过:', r.reason)
+    }
+    if (parts.length === 0) return
+    setImages((prev) => [...prev, ...parts].slice(0, MAX_IMAGES))
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     const cmd = input.trim()
-    if (!cmd || status !== 'ready') return
-    const handled = await dispatch(cmd, {
-      chatId,
-      showPanel: setPanel,
-      send: (text) => void sendMessage({ text }),
-    })
-    if (handled) {
-      setInput('')
-      return
+    if (status !== 'ready') return
+    // 有图片时不走斜杠命令，按普通消息发送
+    if (cmd && images.length === 0) {
+      const handled = await dispatch(cmd, {
+        chatId,
+        showPanel: setPanel,
+        send: (text) => void sendMessage({ text }),
+      })
+      if (handled) {
+        setInput('')
+        return
+      }
     }
-    sendMessage({ text: input })
+    if (!cmd && images.length === 0) return
+    // 纯图发送时 text 传 undefined，避免产生空白 text part（会绕过网关识图修复）
+    sendMessage({ text: cmd || undefined, files: images })
     setInput('')
+    setImages([])
+  }
+
+  const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    const files = Array.from(e.clipboardData.files)
+    if (files.some((f) => f.type.startsWith('image/'))) {
+      e.preventDefault()
+      void addImages(files)
+    }
   }
 
   const busy = status === 'submitted' || status === 'streaming'
@@ -266,6 +333,10 @@ function ChatPanel({
             .filter((part) => part.type === 'text')
             .map((part) => part.text)
             .join('')
+          const imgs = message.parts.filter(
+            (part): part is FileUIPart =>
+              part.type === 'file' && part.mediaType.startsWith('image/'),
+          )
           return (
             <div
               key={message.id}
@@ -281,6 +352,21 @@ function ChatPanel({
                   </summary>
                   <p className="mt-1 whitespace-pre-wrap">{reasoning}</p>
                 </details>
+              )}
+              {imgs.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {imgs.map((part, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 同一图片可重复出现，url 可能重复，需索引区分
+                    <span key={`${i}:${part.url}`}>
+                      {/* biome-ignore lint/performance/noImgElement: data URL 本地图片，next/image 优化无意义 */}
+                      <img
+                        src={part.url}
+                        alt={part.filename ?? '图片'}
+                        className="max-h-48 rounded"
+                      />
+                    </span>
+                  ))}
+                </div>
               )}
               <p className="whitespace-pre-wrap">{text}</p>
             </div>
@@ -299,20 +385,67 @@ function ChatPanel({
           停止生成
         </button>
       ) : (
-        <form onSubmit={onSubmit} className="flex gap-2">
-          <input
-            className="flex-1 rounded border border-gray-300 px-3 py-2"
-            placeholder="说点什么…（/context 上下文 · /usage 成本 · /memory 记忆 · /lint 体检 · /dream 整理）"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || status !== 'ready'}
-            className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-          >
-            发送
-          </button>
+        <form onSubmit={onSubmit} className="flex flex-col gap-2">
+          {/* 发送前缩略图预览 */}
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {images.map((part, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: 同一图片可重复添加，url 可能重复，需索引区分
+                <div key={`${i}:${part.url}`} className="relative h-16 w-16">
+                  {/* biome-ignore lint/performance/noImgElement: data URL 本地图片，next/image 优化无意义 */}
+                  <img
+                    src={part.url}
+                    alt={part.filename ?? '待发送图片'}
+                    className="h-full w-full rounded object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label="移除图片"
+                    onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="absolute -right-1 -top-1 rounded-full bg-black px-1 text-xs leading-4 text-white"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void addImages(Array.from(e.target.files ?? []))
+                e.target.value = '' // 重置以允许重复选择同一文件
+              }}
+            />
+            <button
+              type="button"
+              aria-label="上传图片"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded border border-gray-300 px-3 py-2"
+              title="上传图片（也可直接粘贴）"
+            >
+              🖼️
+            </button>
+            <input
+              className="flex-1 rounded border border-gray-300 px-3 py-2"
+              placeholder="说点什么…（支持粘贴/上传图片 · /context 上下文 · /usage 成本 · /memory 记忆 · /lint 体检 · /dream 整理）"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
+            />
+            <button
+              type="submit"
+              disabled={(!input.trim() && images.length === 0) || status !== 'ready'}
+              className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+            >
+              发送
+            </button>
+          </div>
         </form>
       )}
     </section>

@@ -1,5 +1,5 @@
 import { zValidator } from '@hono/zod-validator'
-import type { UIMessage } from 'ai'
+import type { ModelMessage, UIMessage } from 'ai'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -74,6 +74,26 @@ export const chatsRoute = new Hono()
   })
 
 /**
+ * 网关兼容：image-only 的用户消息会被网关按意图路由到非视觉通道，图片降级成
+ * 截断的 base64 文本（实测无文字/"图片"等泛化词 → 模型收到文本，而
+ * "描述这张图片"/"What is in this image?" → 视觉正常）。给此类消息补一个
+ * 明确的识图指令 text part——仅作用于发往模型的 ModelMessage，不落库、
+ * 不影响前端展示。
+ */
+function ensureTextPartForImageOnlyMessages(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((msg) => {
+    if (msg.role !== 'user' || typeof msg.content === 'string') return msg
+    const hasImage = msg.content.some((part) => part.type === 'file')
+    const hasText = msg.content.some((part) => part.type === 'text')
+    if (!hasImage || hasText) return msg
+    return {
+      ...msg,
+      content: [...msg.content, { type: 'text' as const, text: '请识别这张图片的内容' }],
+    }
+  })
+}
+
+/**
  * Chat sub-router — LLM 流式对话（无需登录）。
  * body: { chatId, messages: UIMessage[] }。用户最后一条消息先落库，
  * AI 回复在流结束后落库；首条消息自动生成会话标题。
@@ -134,7 +154,7 @@ export const chatRoute = new Hono().post(
       messages,
       createdAtById,
     )
-    const defense = applyDefense(modelMessages, timestamps)
+    const defense = applyDefense(ensureTextPartForImageOnlyMessages(modelMessages), timestamps)
     const { messages: compacted, cleared } = microcompact(defense.messages)
     const { messages: llmMessages, compressedCount } = await summarize(
       model,

@@ -22,4 +22,5 @@
 - Windows 上 tsx watch 重启后偶发遗留 MCP stdio 子进程（npx）→ Windows 无真实 POSIX 信号，强杀/重启时 `SIGINT`/`SIGTERM` 处理器不执行，`client.close()` 清理代码跑不到 → 依赖 MCP server 子进程监听 stdin 断开自动退出；仍遗留时用 `taskkill /F /PID <pid>` 手动清理（与 tsx 遗留进程同源，可用 `Get-Process node,npx` 排查）。
 - 并发跑两个 `pnpm add` 后 `package.json` 丢失新装依赖 → 两个 pnpm 进程同时改写同一 `package.json` / `pnpm-lock.yaml`，后写入者覆盖 → 同一 workspace 的依赖安装必须串行，等上一个进程结束再执行下一个。
 - 安装 `@langfuse/otel` 报 peer 冲突（`@opentelemetry/core` 3.0.0 vs `^2.0.1`、`api` 1.10.0 vs `<1.10.0`）→ 最新 `@opentelemetry/sdk-node@0.300` 依赖 core 3.x，与 Langfuse 6.0.2 的 peer 不兼容 → 固定 `@opentelemetry/sdk-node@0.211.0` 与 `@opentelemetry/api@1.9.1`。
+- 纯图消息（无文字）模型称"收到截断的 base64 文本、无视觉能力" → Anthropic 协议网关按用户消息 text 意图路由视觉通道，无文字或泛化词（"图片"/`[图片]`）触发降级，图片被转成 ~850 tok 的截断文本（对照 trace usage：降级 4313 vs 视觉 3466 inputTokens）→ 后端给 image-only 消息补明确识图指令（`ensureTextPartForImageOnlyMessages`，chat.ts），仅内存不落库。
 
