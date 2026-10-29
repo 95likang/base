@@ -42,7 +42,7 @@ function GenUIFailure({ name, detail }: { name: string; detail: string }) {
 export function GenUIPart({ part }: { part: RenderablePart }) {
   const toolName = part.type.slice('tool-'.length)
 
-  // 未注册 name：不做模糊匹配，屏幕上不显示（文档 8.3）
+  // 未注册 name：不做模糊匹配，屏幕上不显示
   if (!isGenUIToolName(toolName)) {
     console.warn('[genui] 未注册的组件，已跳过:', toolName)
     return null

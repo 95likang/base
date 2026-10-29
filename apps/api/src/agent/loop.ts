@@ -281,7 +281,7 @@ export async function agentLoop(
     }
 
     // 本步全部是纯渲染工具 → 卡片已随 tool part 上屏，服务端没有后续动作。
-    // 不再请求下一轮，避免白跑一次模型调用（文档 4.2 的意图）。
+    // 不再请求下一轮，避免白跑一次模型调用。
     if (onlyRenderCalls) {
       finishedByReply = true
       break
