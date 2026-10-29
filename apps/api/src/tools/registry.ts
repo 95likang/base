@@ -31,6 +31,11 @@ export interface ToolDefinition {
   isConcurrencySafe?: boolean
   /** 只读（无副作用）：目前作为自描述元数据，预留给将来的权限/审计层 */
   isReadOnly?: boolean
+  /**
+   * 纯渲染型工具：前端负责画，服务端没有实际业务逻辑。
+   * agentLoop 检测到本步全部调用都是渲染型时立即结束，不再多跑一轮模型调用。
+   */
+  renderOnly?: boolean
   /** 结果截断上限（字符数），默认 3000 */
   maxResultChars?: number
   /**
@@ -102,6 +107,19 @@ export class ToolRegistry {
   /** 当前激活的工具（延迟未发现、角色不允许的工具排除在外） */
   getActiveTools(): ToolDefinition[] {
     return this.getAll().filter((tool) => !this.isDeferred(tool) && this.isAllowed(tool))
+  }
+
+  /**
+   * 纯渲染型工具名集合：agentLoop 据此判断本步是否只画图、不再请求下一轮。
+   * 只统计真正暴露给模型的工具（延迟未激活 / 角色不允许的不算），
+   * 否则 prompt 会引导模型调用一个根本不可见的工具。
+   */
+  getRenderToolNames(): ReadonlySet<string> {
+    return new Set(
+      this.getActiveTools()
+        .filter((tool) => tool.renderOnly === true)
+        .map((tool) => tool.name),
+    )
   }
 
   /** 角色是否允许使用该工具 */

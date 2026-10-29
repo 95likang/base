@@ -50,6 +50,7 @@ export interface BudgetState {
  *   规范化成四类 token（input / output / cache 读 / cache 写）后按价格表计价累计。
  * @param chatId 可选会话 id：写入成本记录，供按会话查询用量（/api/usage?chatId=）
  * @param trace 可选本任务 Trace 记录器：每步记录输入上下文、输出、usage 与耗时
+ * @param renderToolNames 可选纯渲染工具名集合：本步全部调用都是渲染型时直接结束循环
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -63,6 +64,7 @@ export async function agentLoop(
   usageTracker?: UsageTracker,
   chatId?: string,
   trace?: LocalTraceRecorder,
+  renderToolNames?: ReadonlySet<string>,
 ): Promise<void> {
   // LanguageModel 联合类型含字符串形式（GlobalProviderModelId），两种都取得到 id
   const modelId = typeof model === 'string' ? model : model.modelId
@@ -78,6 +80,8 @@ export async function agentLoop(
 
     let hasToolCall = false
     let shouldBreak = false
+    // 本步是否只调用了纯渲染工具（前端负责画，服务端无事可做）
+    let onlyRenderCalls = true
     // 本步是否已向客户端转发过内容——转发过就不能重试：
     // 重试会以新的消息 id 重新发送，前端会出现重复的文本/工具卡片
     let forwarded = false
@@ -147,8 +151,17 @@ export async function agentLoop(
             case 'reasoning-end':
               send({ type: 'reasoning-end', id: part.id })
               break
+            case 'tool-input-start':
+              // 参数开始生成：前端据此显示卡片骨架（此时还没有任何字段闭合）
+              send({ type: 'tool-input-start', toolCallId: part.id, toolName: part.toolName })
+              break
+            case 'tool-input-delta':
+              send({ type: 'tool-input-delta', toolCallId: part.id, inputTextDelta: part.delta })
+              break
             case 'tool-call': {
               hasToolCall = true
+              // 有一个非渲染工具就不是「只画图」，本步结束后仍需继续循环
+              if (!renderToolNames?.has(part.toolName)) onlyRenderCalls = false
               pendingCalls.set(part.toolCallId, { name: part.toolName, input: part.input })
               console.log(`  [调用: ${part.toolName}(${logTrunc(part.input)})]`)
 
@@ -188,6 +201,8 @@ export async function agentLoop(
             case 'tool-error': {
               // 工具 execute 抛异常：转发给前端，同时继续循环让模型看到错误并自行处理
               hasToolCall = true
+              // 出错就不是「纯渲染」：必须继续下一轮让模型看到错误，不能提前结束
+              onlyRenderCalls = false
               const call = pendingCalls.get(part.toolCallId)
               if (call) {
                 guard.recordResult(call.name, call.input, {
@@ -246,6 +261,7 @@ export async function agentLoop(
         guard.restore(guardMark)
         hasToolCall = false
         shouldBreak = false
+        onlyRenderCalls = true
         reminders.clear()
         // 等待期间客户端断开 → sleep 立即 reject，终止重试
         await sleep(delay, abortSignal)
@@ -260,6 +276,13 @@ export async function agentLoop(
 
     // 本步没有工具调用 → 模型直接给出文本回复，结束循环
     if (!hasToolCall) {
+      finishedByReply = true
+      break
+    }
+
+    // 本步全部是纯渲染工具 → 卡片已随 tool part 上屏，服务端没有后续动作。
+    // 不再请求下一轮，避免白跑一次模型调用（文档 4.2 的意图）。
+    if (onlyRenderCalls) {
       finishedByReply = true
       break
     }

@@ -1,6 +1,7 @@
 import type { BudgetState } from '../agent/loop'
 import { subAgentRegistry } from '../agents'
 import { cronService } from '../cron'
+import { createGenUITools } from '../genui/tools'
 import { pluginManager } from '../plugins'
 import { ragEmbedder, ragStore } from '../rag/service'
 import { getRole, hookPipeline } from '../security'
@@ -67,6 +68,8 @@ export async function createDefaultToolRegistry(options?: {
   registry.register(createSpawnTool(subAgentRegistry, registry, options?.budget))
   // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）
   registry.register(...pluginManager.getTools())
+  // 生成式 UI：纯渲染型工具，模型只填参数，组件由前端注册表渲染
+  registry.register(...createGenUITools())
   // 安全层：继承进程级角色，挂上共享的 hook 管线
   registry.setRole(getRole())
   registry.setHookPipeline(hookPipeline)

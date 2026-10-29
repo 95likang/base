@@ -126,9 +126,11 @@ export const chatRoute = new Hono().post(
     const memories = await listActiveMemories()
     // 知识库状态同样请求级读取：索引懒加载后取规模与来源，空库时不注入该段
     await ragStore.ensureLoaded()
+    const renderToolNames = registry.getRenderToolNames()
     const promptCtx: PromptContext = {
       toolCount: registry.getActiveTools().length,
       hasSpawnAgent: registry.getActiveTools().some((tool) => tool.name === 'spawn_agent'),
+      hasGenUI: renderToolNames.size > 0,
       deferredToolSummary: registry.getDeferredToolSummary(),
       sessionMessageCount: messages.length,
       sessionId: chatId,
@@ -222,6 +224,7 @@ export const chatRoute = new Hono().post(
                 usageLog,
                 chatId,
                 trace,
+                renderToolNames,
               ),
           )
           await trace?.finish(c.req.raw.signal.aborted ? 'cancelled' : 'completed')

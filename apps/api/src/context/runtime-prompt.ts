@@ -21,6 +21,7 @@ export async function buildRuntimeSystem(
   return promptBuilder.build({
     toolCount: registry.getActiveTools().length,
     hasSpawnAgent: registry.getActiveTools().some((tool) => tool.name === 'spawn_agent'),
+    hasGenUI: registry.getRenderToolNames().size > 0,
     deferredToolSummary: registry.getDeferredToolSummary(),
     sessionMessageCount: messageCount,
     sessionId,

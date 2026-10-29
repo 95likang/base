@@ -12,6 +12,8 @@ export interface PromptContext {
   toolCount: number
   /** 当前是否可用 spawn_agent（子 Agent 自身不可用，提示里不能引导它派活） */
   hasSpawnAgent?: boolean
+  /** 是否有生成式 UI 渲染工具（决定是否注入「先结论后卡片」规则） */
+  hasGenUI?: boolean
   /** 延迟工具目录（registry.getDeferredToolSummary()，无延迟工具时为空串） */
   deferredToolSummary: string
   /** 本次请求携带的会话历史消息数（含最新一条用户消息） */
@@ -94,6 +96,12 @@ export function toolGuide(): PipeFn {
     if (ctx.hasSpawnAgent) {
       lines.push(
         '涉及多个独立目标的调研、对比任务时，优先用 spawn_agent 并行执行，避免把大量探索过程堆进当前上下文。',
+      )
+    }
+    if (ctx.hasGenUI) {
+      lines.push(
+        '需要图表或数据卡片时：先用一句纯文本给出结论或发现，再调用 render* 工具；' +
+          '卡片里的数值必须来自本轮工具查询结果，不得推测或编造；一次回答只画必要的图，不要重复渲染同一份数据。',
       )
     }
     return lines.join('\n')

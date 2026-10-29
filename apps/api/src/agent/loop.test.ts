@@ -68,14 +68,14 @@ const usage = (tokens: number) => ({
 })
 
 /** 一步带工具调用的 doStream 结果（驱动循环进入下一步） */
-function toolCallStream(tokens: number) {
+function toolCallStream(tokens: number, toolName = 'echo') {
   return {
     stream: new ReadableStream({
       start(controller) {
         controller.enqueue({
           type: 'tool-call',
           toolCallId: 'call-1',
-          toolName: 'echo',
+          toolName,
           input: '{}',
         })
         controller.enqueue({
@@ -287,5 +287,74 @@ describe('agentLoop Token 预算', () => {
 
     await agentLoop(model, {}, makeMessages(), 'test system', mockWriter())
     expect(model.doStreamCalls.length).toBe(1)
+  })
+})
+
+describe('agentLoop 纯渲染工具', () => {
+  /** 渲染工具：卡片由前端画，服务端只需 tool part 上屏 */
+  const renderTools = {
+    renderMetricCard: tool({
+      inputSchema: z.object({}),
+      execute: async () => ({ rendered: true }),
+    }),
+  }
+  const renderOnly = new Set(['renderMetricCard'])
+  /** 参数表太长：把前半段固定下来，只暴露关心的 writer / renderToolNames */
+  const run = (model: MockLanguageModelV3, writer: ReturnType<typeof mockWriter>) =>
+    agentLoop(
+      model,
+      renderTools,
+      makeMessages(),
+      'test system',
+      writer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      renderOnly,
+    )
+
+  it('本步只调用渲染工具 → 不再请求下一轮', async () => {
+    const model = new MockLanguageModelV3({
+      doStream: vi.fn(() => toolCallStream(10, 'renderMetricCard')),
+    })
+
+    await run(model, mockWriter())
+
+    expect(model.doStreamCalls.length).toBe(1)
+  })
+
+  it('渲染工具执行出错 → 继续下一轮，让模型看到错误', async () => {
+    const failingTools = {
+      renderMetricCard: tool({
+        inputSchema: z.object({}),
+        execute: async () => {
+          throw new Error('boom')
+        },
+      }),
+    }
+    const results = [toolCallStream(10, 'renderMetricCard'), textStreamWithUsage('换个方式', 5)]
+    const model = new MockLanguageModelV3({
+      doStream: () => results.shift() ?? textStream('unexpected'),
+    })
+
+    await agentLoop(
+      model,
+      failingTools,
+      makeMessages(),
+      'test system',
+      mockWriter(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      renderOnly,
+    )
+
+    expect(model.doStreamCalls.length).toBe(2)
   })
 })

@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { GenUIPart, isGenUIPart } from '@/genui/render'
 import { contextCommand } from './commands/context'
 import { dreamCommand, lintCommand, memoryCommand } from './commands/memory'
 import {
@@ -329,14 +330,6 @@ function ChatPanel({
             .filter((part) => part.type === 'reasoning')
             .map((part) => part.text)
             .join('')
-          const text = message.parts
-            .filter((part) => part.type === 'text')
-            .map((part) => part.text)
-            .join('')
-          const imgs = message.parts.filter(
-            (part): part is FileUIPart =>
-              part.type === 'file' && part.mediaType.startsWith('image/'),
-          )
           return (
             <div
               key={message.id}
@@ -353,11 +346,20 @@ function ChatPanel({
                   <p className="mt-1 whitespace-pre-wrap">{reasoning}</p>
                 </details>
               )}
-              {imgs.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {imgs.map((part, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: 同一图片可重复出现，url 可能重复，需索引区分
-                    <span key={`${i}:${part.url}`}>
+              {/* 按 parts 顺序渲染：文本段落与卡片保持模型输出的先后关系 */}
+              {message.parts.map((part, i) => {
+                if (part.type === 'text') {
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: part 没有稳定 id，顺序即身份
+                    <p key={`text:${i}`} className="whitespace-pre-wrap">
+                      {part.text}
+                    </p>
+                  )
+                }
+                if (part.type === 'file' && part.mediaType.startsWith('image/')) {
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 同一图片可重复出现，需索引区分
+                    <span key={`file:${i}:${part.url}`} className="mb-2 block">
                       {/* biome-ignore lint/performance/noImgElement: data URL 本地图片，next/image 优化无意义 */}
                       <img
                         src={part.url}
@@ -365,10 +367,17 @@ function ChatPanel({
                         className="max-h-48 rounded"
                       />
                     </span>
-                  ))}
-                </div>
-              )}
-              <p className="whitespace-pre-wrap">{text}</p>
+                  )
+                }
+                if (isGenUIPart(part)) {
+                  return (
+                    <div key={`genui:${part.toolCallId ?? i}`} className="my-2">
+                      <GenUIPart part={part} />
+                    </div>
+                  )
+                }
+                return null
+              })}
             </div>
           )
         })}
