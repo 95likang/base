@@ -24,3 +24,13 @@
 - 安装 `@langfuse/otel` 报 peer 冲突（`@opentelemetry/core` 3.0.0 vs `^2.0.1`、`api` 1.10.0 vs `<1.10.0`）→ 最新 `@opentelemetry/sdk-node@0.300` 依赖 core 3.x，与 Langfuse 6.0.2 的 peer 不兼容 → 固定 `@opentelemetry/sdk-node@0.211.0` 与 `@opentelemetry/api@1.9.1`。
 - 纯图消息（无文字）模型称"收到截断的 base64 文本、无视觉能力" → Anthropic 协议网关按用户消息 text 意图路由视觉通道，无文字或泛化词（"图片"/`[图片]`）触发降级，图片被转成 ~850 tok 的截断文本（对照 trace usage：降级 4313 vs 视觉 3466 inputTokens）→ 后端给 image-only 消息补明确识图指令（`ensureTextPartForImageOnlyMessages`，chat.ts），仅内存不落库。
 
+<!-- BEGIN:turborepo-agent-rules -->
+
+# This is NOT the Turborepo you know
+
+Turborepo configuration, task behavior, and CLI commands can vary between installed versions and may differ from your training data. Resolve the `turbo` package from this file's directory or relevant workspace; in monorepos, it may not be visible from the repository root. For example, run `node -p "require.resolve('turbo/package.json')"` from a workspace that depends on `turbo`.
+
+Read `docs/README.md` inside that installed package first, then read the relevant pages from its `docs/` directory before changing Turborepo configuration or commands. Heed deprecation notices. These bundled docs match the installed package version and are available without network access.
+
+This block is written and re-added by `turbo` before repository-scoped commands when an AI agent is detected. In the Turborepo source repository, its template is defined in `crates/turborepo-cli/src/cli/agent_guidance.rs`. Removing the managed block while updates are enabled means a later qualifying invocation will add it again. Set `"agentGuidance": false` in the root `turbo.json` or `turbo.jsonc` to opt out; this does not remove an existing block. Keep the block committed with your work to avoid an uncommitted change on the next agent invocation.
+<!-- END:turborepo-agent-rules -->

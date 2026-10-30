@@ -17,6 +17,7 @@ import {
 } from './file-tools'
 import { getMcpTools } from './mcp-client'
 import { createMemoryTool } from './memory-tools'
+import { notifyDiscordTool } from './notify-tools'
 import { createRagTools } from './rag-tools'
 import { ToolRegistry } from './registry'
 import { pickSearchTool, startPreviewTool, webFetchTool } from './search-tools'
@@ -64,6 +65,8 @@ export async function createDefaultToolRegistry(options?: {
   registry.register(createSkillTool(skillLoader))
   // 定时任务管理：与 /api/cron 管理页共用同一个进程级调度器
   registry.register(createCronTool(cronService))
+  // 主动推送：把消息发到固定的 Discord 通知频道
+  registry.register(notifyDiscordTool)
   // 子 Agent：独立上下文执行 + 结果压缩回传，运行记录进进程级注册表
   registry.register(createSpawnTool(subAgentRegistry, registry, options?.budget))
   // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）

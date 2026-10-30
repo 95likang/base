@@ -10,6 +10,7 @@ const CHANNELS_KEY = ['channels']
  */
 export function ChannelsPage() {
   const [text, setText] = useState('你好')
+  const [discordText, setDiscordText] = useState('来自管理页的测试推送')
 
   const channelsQuery = useQuery({
     queryKey: CHANNELS_KEY,
@@ -27,6 +28,14 @@ export function ChannelsPage() {
       if (!res.ok) throw new Error(await readError(res))
       const data = await res.json()
       return data.reply
+    },
+  })
+
+  const pushDiscord = useMutation({
+    mutationFn: async (message: string) => {
+      const res = await client.api.channels.discord.push.$post({ json: { text: message } })
+      if (!res.ok) throw new Error(await readError(res))
+      return (await res.json()).sent
     },
   })
 
@@ -51,6 +60,7 @@ export function ChannelsPage() {
             <tr className="border-b border-gray-200 text-left text-gray-600">
               <th className="py-2 pr-3">名称</th>
               <th className="py-2 pr-3">描述</th>
+              <th className="py-2 pr-3">状态</th>
             </tr>
           </thead>
           <tbody>
@@ -58,6 +68,15 @@ export function ChannelsPage() {
               <tr key={channel.name} className="border-b border-gray-100">
                 <td className="py-2 pr-3 font-medium">{channel.name}</td>
                 <td className="py-2 pr-3 text-gray-600">{channel.description}</td>
+                <td className="py-2 pr-3">
+                  {channel.ready === null ? (
+                    <span className="text-gray-500">未知</span>
+                  ) : channel.ready ? (
+                    <span className="text-green-700">已连接</span>
+                  ) : (
+                    <span className="text-red-600">未连接</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -90,6 +109,37 @@ export function ChannelsPage() {
           <pre className="mt-3 whitespace-pre-wrap rounded bg-gray-100 p-3 text-sm">
             {test.data || '（无回复）'}
           </pre>
+        )}
+      </section>
+
+      <section className="mt-8">
+        <h2 className="mb-2 text-lg font-semibold">推送到 Discord</h2>
+        <p className="mb-3 text-sm text-gray-500">
+          直接推送到配置的固定频道（DISCORD_NOTIFY_CHANNEL_ID），不经过 Agent。 需要 bot
+          已登录成功。提及用户写 <code>&lt;@用户ID&gt;</code>，提及角色写{' '}
+          <code>&lt;@&amp;角色ID&gt;</code>，@everyone / @here 会通知全员。
+        </p>
+        <textarea
+          className="h-24 w-full rounded border border-gray-300 p-3 font-mono text-sm"
+          value={discordText}
+          onChange={(e) => setDiscordText(e.target.value)}
+        />
+        <button
+          type="button"
+          className="mt-2 rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+          disabled={pushDiscord.isPending || !discordText.trim()}
+          onClick={() => {
+            pushDiscord.reset()
+            pushDiscord.mutate(discordText.trim())
+          }}
+        >
+          {pushDiscord.isPending ? '推送中…' : '推送'}
+        </button>
+        {pushDiscord.isError && (
+          <p className="mt-2 text-sm text-red-600">{pushDiscord.error.message}</p>
+        )}
+        {pushDiscord.isSuccess && (
+          <p className="mt-2 text-sm text-green-700">已推送，去 Discord 频道查看。</p>
         )}
       </section>
     </main>

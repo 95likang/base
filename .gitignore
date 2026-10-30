@@ -9,6 +9,7 @@ dist
 super-agent.config.json
 .DS_Store
 coverage
+tmp-*
 drizzle/meta
 workspace/
 .usage/

@@ -171,7 +171,6 @@ describe('ChannelGateway', () => {
 
     expect(channel.send).toHaveBeenCalledWith({
       channelId: 'chat-1',
-      recipientId: 'user-1',
       text: '收到',
     })
   })

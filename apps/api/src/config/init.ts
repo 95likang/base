@@ -39,6 +39,9 @@ export async function runInit(): Promise<void> {
 
   const enableFeishu = (await ask('\n  启用飞书 Channel? (y/N): ')).trim().toLowerCase() === 'y'
 
+  const enableDiscord =
+    (await ask('\n  启用 Discord Channel? (y/N): ')).trim().toLowerCase() === 'y'
+
   let maxConcurrent = 3
   while (true) {
     const input = (await ask('\n  子 Agent 最大并发数 [3]: ')).trim()
@@ -88,6 +91,12 @@ export async function runInit(): Promise<void> {
             enabled: true,
             appId: env('FEISHU_APP_ID'),
             appSecret: env('FEISHU_APP_SECRET'),
+          }
+        : { enabled: false },
+      discord: enableDiscord
+        ? {
+            enabled: true,
+            botToken: env('DISCORD_BOT_TOKEN'),
           }
         : { enabled: false },
     },

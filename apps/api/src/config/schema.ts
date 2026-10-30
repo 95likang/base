@@ -30,8 +30,20 @@ const FeishuChannelConfigSchema = z.object({
   appSecret: z.string().default(() => process.env.FEISHU_APP_SECRET ?? ''),
 })
 
+const DiscordChannelConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  botToken: z.string().default(() => process.env.DISCORD_BOT_TOKEN ?? ''),
+  /** 访问 Discord 需要代理时配置，如 http://127.0.0.1:7890 */
+  proxyUrl: z.string().default(() => process.env.DISCORD_PROXY_URL ?? ''),
+  /** 主动推送（定时任务结果、notify_discord 工具）的目标频道 ID；留空则禁用推送 */
+  notifyChannelId: z.string().default(() => process.env.DISCORD_NOTIFY_CHANNEL_ID ?? ''),
+  /** 每条主动推送都 @ 的用户 ID；留空则不 @ */
+  notifyUserId: z.string().default(() => process.env.DISCORD_NOTIFY_USER_ID ?? ''),
+})
+
 const ChannelConfigSchema = z.object({
   feishu: FeishuChannelConfigSchema.prefault({}),
+  discord: DiscordChannelConfigSchema.prefault({}),
 })
 
 const AgentConfigSchema = z.object({

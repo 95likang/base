@@ -50,7 +50,6 @@ export class ChannelGateway {
         console.error(`  [${channel.name}] 处理消息失败:`, err)
         await channel.send({
           channelId: msg.channelId,
-          recipientId: msg.senderId,
           text: '处理失败，请稍后重试。',
         })
       })
@@ -146,7 +145,6 @@ export class ChannelGateway {
     if (deliver && channel) {
       await channel.send({
         channelId: msg.channelId,
-        recipientId: msg.senderId,
         text: replyText,
       })
       console.log(
@@ -174,10 +172,12 @@ export class ChannelGateway {
     return session
   }
 
-  list(): Array<{ name: string; description: string }> {
+  list(): Array<{ name: string; description: string; ready: boolean | null }> {
     return Array.from(this.channels.values()).map((channel) => ({
       name: channel.name,
       description: channel.description,
+      // null = 通道不提供状态（长连接由 SDK 托管），前端显示「未知」而不是假装已连接
+      ready: channel.isReady?.() ?? null,
     }))
   }
 

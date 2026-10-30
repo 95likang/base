@@ -16,9 +16,8 @@ export interface IncomingMessage {
 
 /** 通过通道发出的消息 */
 export interface OutgoingMessage {
-  /** 发回的目标会话（飞书为 chat_id） */
+  /** 发往的目标会话（飞书为 chat_id，Discord 为 channel_id） */
   channelId: string
-  recipientId: string
   text: string
 }
 
@@ -29,6 +28,9 @@ export interface ChannelDefinition {
   start(): Promise<void> | void
   stop(): Promise<void> | void
   send(message: OutgoingMessage): Promise<void>
+
+  /** 运行状态：未实现时视为就绪（部分通道的长连接由 SDK 托管，无法查询） */
+  isReady?(): boolean
 
   onMessage?: (handler: (msg: IncomingMessage) => void) => void
 }
