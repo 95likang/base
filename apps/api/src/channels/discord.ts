@@ -1,7 +1,13 @@
 import { createRequire } from 'node:module'
-import type { Client, ClientOptions, Message } from 'discord.js'
+import type { Client, ClientOptions, Interaction, Message } from 'discord.js'
 import { HttpsProxyAgent } from 'https-proxy-agent'
-import type { ChannelDefinition, IncomingMessage, OutgoingMessage } from './types'
+import type {
+  ChannelAction,
+  ChannelActionEvent,
+  ChannelDefinition,
+  IncomingMessage,
+  OutgoingMessage,
+} from './types'
 
 export interface DiscordConfig {
   botToken: string
@@ -22,6 +28,7 @@ export class DiscordChannel implements ChannelDefinition {
 
   private config: DiscordConfig
   private messageHandler?: (msg: IncomingMessage) => void
+  private actionHandler?: (event: ChannelActionEvent) => Promise<string> | string
   private client?: Client
 
   constructor(config: DiscordConfig) {
@@ -30,6 +37,11 @@ export class DiscordChannel implements ChannelDefinition {
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
     this.messageHandler = handler
+  }
+
+  /** 按钮回调：返回文本会追加到原消息并移除按钮 */
+  onAction(handler: (event: ChannelActionEvent) => Promise<string> | string): void {
+    this.actionHandler = handler
   }
 
   async start(): Promise<void> {
@@ -68,6 +80,9 @@ export class DiscordChannel implements ChannelDefinition {
     this.client = new Client(options)
 
     this.client.on(Events.MessageCreate, (message) => this.handleMessage(message))
+    this.client.on(Events.InteractionCreate, (interaction) => {
+      void this.handleInteraction(interaction)
+    })
     this.client.on(Events.Error, (err) => {
       console.error(`    [discord] 连接错误: ${err.message}`)
     })
@@ -107,11 +122,15 @@ export class DiscordChannel implements ChannelDefinition {
         return
       }
       // 超长回复切块依次发送，保持顺序；单块失败不阻断后续
-      for (const chunk of splitText(message.text)) {
+      const chunks = splitText(message.text)
+      const components = message.actions ? await buildComponents(message.actions) : undefined
+      for (const [index, chunk] of chunks.entries()) {
         try {
           // 允许 @用户 / @角色 / @everyone（内容里写 <@ID>、<@&ID>、@everyone）
           await channel.send({
             content: chunk,
+            // 按钮挂在最后一块，避免用户在第一块就点击、后面还没发完
+            components: index === chunks.length - 1 ? components : undefined,
             allowedMentions: { parse: ['users', 'roles', 'everyone'] },
           })
         } catch (err) {
@@ -122,6 +141,40 @@ export class DiscordChannel implements ChannelDefinition {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`    [discord] 发送失败: ${msg}`)
+    }
+  }
+
+  private async handleInteraction(interaction: Interaction): Promise<void> {
+    if (!interaction.isButton() || !this.actionHandler) return
+
+    // Discord 要求 3 秒内响应：先 defer；超时失败也继续处理业务
+    await interaction.deferUpdate().catch(() => {})
+
+    const content = interaction.message.content
+    let reply: string
+    try {
+      reply = await this.actionHandler({
+        actionId: interaction.customId,
+        senderId: interaction.user.id,
+        messageText: content,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`    [discord] 按钮处理失败: ${message}`)
+      reply = '处理失败，请稍后重试'
+    }
+
+    try {
+      // 处理完移除按钮；旧消息上的按钮被再次点击时由回调做幂等判断
+      const merged = `${content}\n\n${reply}`
+      await interaction.editReply({
+        // 拼接结果可能超过 2000 字符上限，超长时只保留处理结果
+        content: merged.length > 2000 ? reply : merged,
+        components: [],
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`    [discord] 更新按钮消息失败: ${message}`)
     }
   }
 
@@ -191,6 +244,25 @@ function applyWebSocketProxy(proxyUrl: string): void {
 function stripMention(content: string, botId: string): string {
   if (!botId) return content.trim()
   return content.replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim()
+}
+
+/** 把通道动作渲染成一行按钮；customId 超限的跳过，避免整条消息发送失败 */
+async function buildComponents(actions: ChannelAction[]) {
+  const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js')
+  const row = new ActionRowBuilder<import('discord.js').ButtonBuilder>()
+  for (const action of actions) {
+    if (action.id.length > 100) {
+      console.error(`    [discord] customId 超过 100 字符，按钮已跳过: ${action.id.slice(0, 40)}…`)
+      continue
+    }
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(action.id)
+        .setLabel(action.label)
+        .setStyle(action.style === 'danger' ? ButtonStyle.Danger : ButtonStyle.Secondary),
+    )
+  }
+  return row.components.length > 0 ? [row] : undefined
 }
 
 /** 按长度切块：优先在换行处断开，其次空格，避免把提及/单词切两半 */

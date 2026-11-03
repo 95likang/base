@@ -14,11 +14,30 @@ export interface IncomingMessage {
   raw?: unknown
 }
 
+/** 消息附带的交互按钮：点击后通过 onAction 回调回传 */
+export interface ChannelAction {
+  /** 回调标识，通道内唯一（Discord 的 customId，上限 100 字符） */
+  id: string
+  label: string
+  /** 仅 danger 有视觉区分，其余按次级按钮渲染 */
+  style?: 'danger'
+}
+
+/** 用户点击交互按钮 */
+export interface ChannelActionEvent {
+  actionId: string
+  senderId: string
+  /** 按钮所在消息的文本（一次性任务已从调度器删除，重建提醒需要它） */
+  messageText: string
+}
+
 /** 通过通道发出的消息 */
 export interface OutgoingMessage {
   /** 发往的目标会话（飞书为 chat_id，Discord 为 channel_id） */
   channelId: string
   text: string
+  /** 附带按钮；通道不支持时忽略 */
+  actions?: ChannelAction[]
 }
 
 export interface ChannelDefinition {

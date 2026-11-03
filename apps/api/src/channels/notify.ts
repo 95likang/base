@@ -1,4 +1,5 @@
 import type { DiscordChannel } from './discord'
+import type { ChannelAction } from './types'
 
 /** 主动推送目标：Discord 通道实例 + 固定频道 ID + 每条都要 @ 的用户 */
 let target: { channel: DiscordChannel; channelId: string; userId: string } | undefined
@@ -17,13 +18,13 @@ export function setDiscordNotifier(
  * 配了 notifyUserId 时每条消息都会 @ 该用户。
  * 未配置频道或 Discord 未连接时返回 false；发送失败由通道自身记录日志，不向调用方抛出。
  */
-export async function pushDiscord(text: string): Promise<boolean> {
+export async function pushDiscord(text: string, actions?: ChannelAction[]): Promise<boolean> {
   if (!target?.channelId || !target.channel.isReady()) return false
 
   const { channel, channelId, userId } = target
   const mention = userId ? `<@${userId}>` : ''
   // 避免调用方已经写了同样的提及时重复拼接
   const content = mention && !text.includes(mention) ? `${mention} ${text}` : text
-  await channel.send({ channelId, text: content })
+  await channel.send({ channelId, text: content, actions })
   return true
 }

@@ -1,6 +1,11 @@
-import { getNextCronTime, parseSchedule } from './parser'
+import {
+  detectScheduleType,
+  getNextCronTime,
+  parseSchedule,
+  resolveRelativeSchedule,
+} from './parser'
 import { CronRepository } from './repository'
-import type { CronJobConfig, CronJobState, JobPayload, JobSummary, RunLog } from './types'
+import type { CronJobConfig, CronJobState, JobSummary, RunLog } from './types'
 
 /** setTimeout 的最大延迟（32 位有符号整数）；超过会被 Node 立即触发 */
 const MAX_TIMER_DELAY = 2_147_483_647
@@ -27,6 +32,8 @@ const QUOTES = [
 /** 执行能力由外部注入：CronService 不直接依赖 Agent Loop，便于测试与替换 */
 export interface CronExecutor {
   runAgentPrompt: (prompt: string, timeout?: number) => Promise<string>
+  /** 推送提醒（Discord 带确认按钮） */
+  sendReminder: (text: string, jobId: string) => Promise<string>
   notify?: (message: string) => void
 }
 
@@ -85,6 +92,9 @@ export class CronService {
   async add(config: CronJobConfig): Promise<void> {
     if (this.jobs.has(config.id)) throw new Error(`任务 ${config.id} 已存在`)
     if (this.jobs.size >= MAX_JOBS) throw new Error(`任务数量已达上限 ${MAX_JOBS}`)
+    // 相对时间（in 5m）先换算成绝对时间再落库，否则重启后会被重新解析成「重启后 5 分钟」
+    config.schedule = resolveRelativeSchedule(config.schedule)
+    config.scheduleType = detectScheduleType(config.schedule)
     // 提前解析：表达式非法时立刻失败，而不是等到调度时才在日志里冒出来
     const parsed = parseSchedule(config.schedule)
     if (parsed.type === 'interval' && (parsed.intervalMs ?? 0) < MIN_INTERVAL_MS) {
@@ -234,7 +244,7 @@ export class CronService {
 
     try {
       const timeout = state.config.timeout || 60_000
-      output = await this.runPayload(state.config.payload, timeout)
+      output = await this.runPayload(state.config, timeout)
       state.consecutiveFailures = 0
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -274,10 +284,14 @@ export class CronService {
     return output
   }
 
-  private async runPayload(payload: JobPayload, timeout: number): Promise<string> {
+  private async runPayload(config: CronJobConfig, timeout: number): Promise<string> {
+    const { payload } = config
     if (!this.executor) return '[cron] 未设置执行器，无法运行任务'
     if (payload.type === 'agent') {
       return this.executor.runAgentPrompt(payload.prompt, timeout)
+    }
+    if (payload.type === 'reminder') {
+      return this.executor.sendReminder(payload.text, config.id)
     }
     if (payload.handler === 'random-quote') {
       return QUOTES[Math.floor(Math.random() * QUOTES.length)] ?? QUOTES[0] ?? ''

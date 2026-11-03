@@ -30,7 +30,25 @@ export interface CronJobConfig {
   source: JobSource
 }
 
-export type JobPayload = { type: 'agent'; prompt: string } | { type: 'handler'; handler: string }
+export type JobPayload =
+  | { type: 'agent'; prompt: string }
+  | { type: 'handler'; handler: string }
+  /** 直接推送提醒文本（不走 Agent），附带「稍后提醒 / 关闭」按钮 */
+  | { type: 'reminder'; text: string }
+
+/** 提醒文本长度上限：Discord 单条消息 2000 字符，留出 @ 与按钮结果余量 */
+export const MAX_REMINDER_LENGTH = 1500
+
+/** 三个入口（工具 / HTTP / 管理页）共用：handler > reminder > agent */
+export function buildJobPayload(input: {
+  prompt?: string
+  text?: string
+  handler?: string
+}): JobPayload {
+  if (input.handler) return { type: 'handler', handler: input.handler }
+  if (input.text) return { type: 'reminder', text: input.text }
+  return { type: 'agent', prompt: input.prompt ?? '' }
+}
 
 export interface RunLog {
   /** 所属任务 ID */

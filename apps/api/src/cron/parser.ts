@@ -13,6 +13,8 @@ export interface ParsedSchedule {
 
 /** every 30s / every 5m / every 1h */
 const INTERVAL_RE = /^every\s+(\d+)\s*(s|sec|m|min|h|hour)s?$/i
+/** in 5m / in 2 hours */
+const RELATIVE_RE = /^in\s+(\d+)\s*(s|sec|m|min|h|hour)s?$/i
 /** 以日期开头的表达式按一次性任务处理 */
 const DATE_PREFIX_RE = /^\d{4}-\d{2}-\d{2}/
 
@@ -46,6 +48,20 @@ export function parseSchedule(expr: string): ParsedSchedule {
   }
 
   return { type: 'cron', cronInstance: new Cron(expr) }
+}
+
+/**
+ * 把相对时间（"in 5m"）换算成绝对 ISO 时间；其它表达式原样返回。
+ * 必须在落库前调用：相对时间存进数据库后，重启加载会变成「重启后 5 分钟」。
+ */
+export function resolveRelativeSchedule(expr: string, now = Date.now()): string {
+  const match = expr.match(RELATIVE_RE)
+  if (!match) return expr
+  const value = Number.parseInt(match[1] ?? '0', 10)
+  if (value <= 0) throw new Error(`相对时间必须大于 0: ${expr}`)
+  const unit = (match[2] ?? 'm').toLowerCase()
+  const multiplier = unit.startsWith('h') ? 3_600_000 : unit.startsWith('m') ? 60_000 : 1_000
+  return new Date(now + value * multiplier).toISOString()
 }
 
 /** 距下次 cron 触发还有多少毫秒；取不到时退回 1 分钟 */

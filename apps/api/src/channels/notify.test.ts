@@ -63,4 +63,18 @@ describe('pushDiscord', () => {
     await pushDiscord('hi')
     expect(channel.send).toHaveBeenCalledWith({ channelId: '111', text: 'hi' })
   })
+
+  it('带 actions 时仍会拼 @ 并透传 actions', async () => {
+    const { pushDiscord, setDiscordNotifier } = await freshNotify()
+    const channel = fakeChannel(true)
+    setDiscordNotifier(channel, '111', '222')
+
+    const actions = [{ id: 'cron:alarm:cancel', label: '关闭提醒', style: 'danger' as const }]
+    await pushDiscord('该起床了', actions)
+    expect(channel.send).toHaveBeenCalledWith({
+      channelId: '111',
+      text: '<@222> 该起床了',
+      actions,
+    })
+  })
 })

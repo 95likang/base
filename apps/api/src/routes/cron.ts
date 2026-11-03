@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { cronService } from '../cron'
 import { detectScheduleType } from '../cron/parser'
-import type { CronJobConfig } from '../cron/types'
+import { buildJobPayload, type CronJobConfig, MAX_REMINDER_LENGTH } from '../cron/types'
 import { ApiError, validationHook } from '../lib/api-error'
 import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 
@@ -19,12 +19,13 @@ const addSchema = z
     description: z.string().trim().max(500).optional(),
     schedule: z.string().trim().min(1).max(100),
     prompt: z.string().trim().min(1).optional(),
+    text: z.string().trim().min(1).max(MAX_REMINDER_LENGTH).optional(),
     handler: z.string().trim().min(1).optional(),
     timeout: z.coerce.number().int().min(1000).max(600_000).optional(),
     maxRetries: z.coerce.number().int().min(1).max(10).optional(),
   })
-  .refine((data) => data.prompt || data.handler, {
-    message: 'prompt 与 handler 至少提供一个',
+  .refine((data) => data.prompt || data.text || data.handler, {
+    message: 'prompt、text 与 handler 至少提供一个',
     path: ['prompt'],
   })
 
@@ -64,9 +65,7 @@ export const cronRoute = new Hono<AuthEnv>()
       schedule: input.schedule,
       scheduleType: detectScheduleType(input.schedule),
       enabled: true,
-      payload: input.handler
-        ? { type: 'handler', handler: input.handler }
-        : { type: 'agent', prompt: input.prompt ?? '' },
+      payload: buildJobPayload(input),
       timeout: input.timeout,
       maxRetries: input.maxRetries,
       source: 'runtime',

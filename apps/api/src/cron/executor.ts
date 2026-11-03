@@ -1,6 +1,7 @@
 import type { ModelMessage, UIMessageStreamWriter } from 'ai'
 import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
 import { defaultModel } from '../agent/model'
+import { pushDiscord } from '../channels/notify'
 import { config } from '../config/loader'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
 import { createDefaultToolRegistry } from '../tools/default-registry'
@@ -64,6 +65,14 @@ export async function startCron(): Promise<void> {
       }
 
       return reply.trim() || '(无输出)'
+    },
+    sendReminder: async (text, jobId) => {
+      // 按钮的 customId 由 channels/index.ts 解析：cron:<jobId>:<action>
+      const sent = await pushDiscord(text, [
+        { id: `cron:${jobId}:snooze`, label: '稍后提醒' },
+        { id: `cron:${jobId}:cancel`, label: '关闭提醒', style: 'danger' },
+      ])
+      return sent ? '提醒已推送' : 'Discord 未配置或未连接，提醒未推送'
     },
     notify: (message) => {
       console.log(`\n${message}`)
