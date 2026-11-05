@@ -38,11 +38,11 @@ export function DeletePlanButton({ id, redirectTo }: { id: string; redirectTo?: 
         type="button"
         onClick={remove}
         disabled={deleting}
-        className="shrink-0 text-xs text-red-600 hover:underline disabled:opacity-40"
+        className="shrink-0 text-xs font-bold text-destructive underline-offset-4 hover:underline disabled:opacity-40"
       >
         {deleting ? '删除中…' : '删除'}
       </button>
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </span>
   )
 }

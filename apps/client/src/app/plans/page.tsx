@@ -1,9 +1,20 @@
 import { parseRoadmapContent } from 'api/roadmap/spec'
 import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { createServerClient } from '@/lib/api'
 import { DeletePlanButton } from './DeletePlanButton'
 
 export const dynamic = 'force-dynamic'
+
+const META_COLORS = ['bg-tertiary', 'bg-quaternary', 'bg-secondary'] as const
 
 /**
  * 「我的计划」列表：全部路线图，最近创建的在前。
@@ -16,9 +27,11 @@ export default async function PlansPage() {
 
   if (!res.ok) {
     return (
-      <main className="mx-auto max-w-3xl p-6">
-        <h1 className="mb-4 text-xl font-bold">我的计划</h1>
-        <p className="text-red-600">加载计划失败（{res.status}），请稍后重试。</p>
+      <main className="flex flex-col gap-4 p-4">
+        <h1 className="pt-2 text-2xl">我的计划</h1>
+        <p className="rounded-xl border-2 border-destructive bg-card px-4 py-3 text-sm text-destructive">
+          加载计划失败（{res.status}），请稍后重试。
+        </p>
       </main>
     )
   }
@@ -30,54 +43,81 @@ export default async function PlansPage() {
   })
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold">我的计划</h1>
-        <Link href="/chat" className="text-sm text-gray-500 underline">
-          返回聊天
-        </Link>
-      </div>
+    <main className="flex flex-col gap-4 p-4">
+      <header className="flex items-end justify-between pt-2">
+        <div>
+          <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+            Practice Coach
+          </p>
+          <h1 className="text-2xl">我的计划</h1>
+        </div>
+        <Button asChild size="sm">
+          <Link href="/chat">去聊计划</Link>
+        </Button>
+      </header>
 
       {items.length === 0 ? (
-        <p className="text-gray-500">
-          还没有训练计划。
-          <Link href="/chat" className="underline">
-            去聊天里让 practice-coach 帮你排一个
-          </Link>
-          。
-        </p>
+        <Card className="items-center gap-3 border-dashed py-10 text-center shadow-none hover:scale-100 hover:rotate-0 hover:shadow-none">
+          <CardTitle>还没有训练计划</CardTitle>
+          <CardDescription>去对话里让教练帮你排一个。</CardDescription>
+          <CardContent>
+            <Button asChild size="sm">
+              <Link href="/chat">开始对话</Link>
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {items.map(({ id, createdAt, content }) => (
-            <li key={id} className="flex items-start gap-2">
-              <Link
-                href={`/plans/${id}`}
-                className="block min-w-0 flex-1 rounded-lg border bg-white p-4 hover:bg-gray-50"
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium">{content.title}</span>
-                  <span className="shrink-0 text-xs text-gray-500">
-                    {new Date(createdAt).toLocaleDateString('zh-CN')}
-                  </span>
-                </div>
-                {content.summary ? (
-                  <p className="mt-1 text-sm text-gray-600">{content.summary}</p>
-                ) : null}
-                <p className="mt-2 text-xs text-gray-500">
-                  {content.startDate && content.endDate
-                    ? `${content.startDate} 至 ${content.endDate} · `
-                    : ''}
-                  {content.overallDuration ? `总周期 ${content.overallDuration} · ` : ''}
-                  {content.sessionsPerWeek ? `每周 ${content.sessionsPerWeek} 次 · ` : ''}
-                  {content.sessionMinutes ? `每次 ${content.sessionMinutes} 分钟 · ` : ''}
-                  {content.phases.length} 个阶段
-                </p>
-              </Link>
-              <div className="pt-4">
-                <DeletePlanButton id={id} />
-              </div>
-            </li>
-          ))}
+        <ul className="flex flex-col gap-4">
+          {items.map(({ id, createdAt, content }, index) => {
+            const meta = [
+              content.startDate && content.endDate
+                ? `${content.startDate} 至 ${content.endDate}`
+                : null,
+              content.overallDuration ? `总周期 ${content.overallDuration}` : null,
+              content.sessionsPerWeek ? `每周 ${content.sessionsPerWeek} 次` : null,
+              content.sessionMinutes ? `每次 ${content.sessionMinutes} 分钟` : null,
+              `${content.phases.length} 个阶段`,
+            ].filter((text): text is string => Boolean(text))
+
+            return (
+              <li key={id}>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      <Link href={`/plans/${id}`}>{content.title}</Link>
+                    </CardTitle>
+                    <CardDescription className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{content.summary || '暂无简介'}</span>
+                      <span className="shrink-0 text-xs">
+                        {new Date(createdAt).toLocaleDateString('zh-CN')}
+                      </span>
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="flex flex-wrap gap-1.5">
+                    {meta.map((text, i) => (
+                      <span
+                        key={text}
+                        className={`rounded-full border-2 border-foreground px-2 py-0.5 text-[11px] font-bold text-foreground ${META_COLORS[(index + i) % META_COLORS.length]}`}
+                      >
+                        {text}
+                      </span>
+                    ))}
+                  </CardContent>
+
+                  <CardFooter className="justify-between border-t pt-3">
+                    <Link
+                      href={`/plans/${id}`}
+                      className="text-sm font-bold text-accent underline-offset-4 hover:underline"
+                    >
+                      查看详情 →
+                    </Link>
+                    <DeletePlanButton id={id} />
+                  </CardFooter>
+                </Card>
+              </li>
+            )
+          })}
         </ul>
       )}
     </main>

@@ -2,9 +2,13 @@
 
 import { useRouter } from 'next/navigation'
 import { type FormEvent, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { authClient } from '@/lib/auth-client'
 
-/** 登录/注册页：走同源 rewrite 代理，成功后跳回首页（SSR 会带上新 cookie）。 */
+/** 登录/注册页：走同源 rewrite 代理，成功后回到「我的」页。 */
 export default function LoginPage() {
   const router = useRouter()
   const [mode, setMode] = useState<'signin' | 'signup'>('signup')
@@ -24,10 +28,10 @@ export default function LoginPage() {
           ? await authClient.signUp.email({ name, email, password })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
-        setError(res.error.message ?? 'Authentication failed.')
+        setError(res.error.message ?? '认证失败，请重试。')
         return
       }
-      router.push('/')
+      router.push('/me')
       router.refresh()
     } finally {
       setPending(false)
@@ -35,59 +39,75 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto max-w-xl p-8">
-      <h1 className="mb-6 text-2xl font-bold">
-        {mode === 'signup' ? 'Create account' : 'Sign in'}
-      </h1>
+    <main className="flex flex-col gap-6 p-6">
+      <header className="pt-6 text-center">
+        <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+          Practice Coach
+        </p>
+        <h1 className="text-3xl">{mode === 'signup' ? '创建账号' : '登录'}</h1>
+      </header>
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
-        {mode === 'signup' && (
-          <input
-            className="rounded border border-gray-300 px-3 py-2"
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-        )}
-        <input
-          className="rounded border border-gray-300 px-3 py-2"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className="rounded border border-gray-300 px-3 py-2"
-          type="password"
-          placeholder="Password (min 8 chars)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={8}
-        />
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-        >
-          {pending ? 'Please wait…' : mode === 'signup' ? 'Sign up' : 'Sign in'}
-        </button>
-        {error && <p className="text-red-600">{error}</p>}
-      </form>
+      <Card className="hover:rotate-0 hover:scale-100 hover:shadow-card">
+        <CardContent>
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {mode === 'signup' && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="name">昵称</Label>
+                <Input
+                  id="name"
+                  placeholder="你的昵称"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+            )}
 
-      <p className="mt-4 text-sm text-gray-500">
-        {mode === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="email">邮箱</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="password">密码</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="至少 8 位"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+              />
+            </div>
+
+            <Button type="submit" disabled={pending} className="w-full">
+              {pending ? '请稍候…' : mode === 'signup' ? '注册' : '登录'}
+            </Button>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </form>
+        </CardContent>
+      </Card>
+
+      <p className="text-center text-sm text-muted-foreground">
+        {mode === 'signup' ? '已有账号？' : '还没有账号？'}
         <button
           type="button"
-          className="underline"
+          className="ml-1 font-bold text-accent underline-offset-4 hover:underline"
           onClick={() => {
             setMode(mode === 'signup' ? 'signin' : 'signup')
             setError('')
           }}
         >
-          {mode === 'signup' ? 'Sign in' : 'Sign up'}
+          {mode === 'signup' ? '去登录' : '去注册'}
         </button>
       </p>
     </main>

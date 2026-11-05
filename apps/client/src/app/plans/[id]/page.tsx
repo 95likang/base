@@ -1,6 +1,8 @@
 import { parseRoadmapContent } from 'api/roadmap/spec'
+import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { Button } from '@/components/ui/button'
 import { createServerClient } from '@/lib/api'
 import { RoadmapCard } from '@/roadmap/RoadmapPart'
 import { DeletePlanButton } from '../DeletePlanButton'
@@ -19,23 +21,29 @@ export default async function PlanDetailPage({ params }: { params: Promise<{ id:
   const content = parseRoadmapContent(roadmap.content)
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <Link href="/plans" className="text-sm text-gray-500 underline">
-          ← 返回我的计划
-        </Link>
+    <main className="flex flex-col gap-4 p-4">
+      <header className="flex items-center justify-between gap-2 pt-2">
+        <Button asChild variant="ghost" size="sm" className="-ml-2">
+          <Link href="/plans">
+            <ArrowLeft />
+            计划
+          </Link>
+        </Button>
         <div className="flex items-center gap-3">
-          <Link href={`/chat?id=${roadmap.chatId}`} className="text-sm text-gray-500 underline">
+          <Link
+            href={`/chat/${roadmap.chatId}`}
+            className="text-xs font-bold text-muted-foreground underline-offset-4 hover:underline"
+          >
             来源会话
           </Link>
           <DeletePlanButton id={roadmap.id} redirectTo="/plans" />
         </div>
-      </div>
+      </header>
 
       {content ? (
         <RoadmapCard content={content} roadmapId={roadmap.id} />
       ) : (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="rounded-xl border-2 border-tertiary bg-card px-4 py-3 text-sm">
           计划数据不完整，无法展示。
         </p>
       )}
