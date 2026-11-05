@@ -1,7 +1,10 @@
 'use client'
 
+import { Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 /**
  * 删除计划。列表页与详情页共用：
@@ -10,10 +13,11 @@ import { useState } from 'react'
 export function DeletePlanButton({ id, redirectTo }: { id: string; redirectTo?: string }) {
   const router = useRouter()
   const [deleting, setDeleting] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const remove = async () => {
-    if (!window.confirm('确定删除这个计划？删除后无法恢复。')) return
+    setConfirming(false)
     setDeleting(true)
     setError(null)
     try {
@@ -22,27 +26,39 @@ export function DeletePlanButton({ id, redirectTo }: { id: string; redirectTo?: 
         const body = (await res.json().catch(() => null)) as {
           error?: { message?: string }
         } | null
-        throw new Error(body?.error?.message ?? '删除失败，请重试')
+        throw new Error(body?.error?.message ?? '删除失败，请重试。')
       }
       if (redirectTo) router.push(redirectTo)
-      router.refresh()
+      else router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败，请重试')
+      setError(err instanceof Error ? err.message : '删除失败，请重试。')
       setDeleting(false)
     }
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
-      <button
-        type="button"
-        onClick={remove}
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={deleting ? '正在删除计划' : '删除计划'}
+        title={deleting ? '正在删除计划' : '删除计划'}
         disabled={deleting}
-        className="shrink-0 text-xs font-bold text-destructive underline-offset-4 hover:underline disabled:opacity-40"
+        onClick={() => setConfirming(true)}
+        className="text-destructive hover:bg-destructive/10"
       >
-        {deleting ? '删除中…' : '删除'}
-      </button>
-      {error ? <span className="text-xs text-destructive">{error}</span> : null}
-    </span>
+        <Trash2 />
+      </Button>
+      {error ? (
+        <span className="max-w-40 text-right text-xs leading-snug text-destructive">{error}</span>
+      ) : null}
+      <ConfirmDialog
+        open={confirming}
+        title="删除这个计划？"
+        description="删除后无法恢复，已经完成的训练记录也会一起消失。"
+        onConfirm={remove}
+        onCancel={() => setConfirming(false)}
+      />
+    </div>
   )
 }

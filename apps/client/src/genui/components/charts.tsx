@@ -8,8 +8,8 @@ const PAD = 6
 
 function ChartFrame({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      {title ? <p className="mb-2 text-xs text-gray-500">{title}</p> : null}
+    <div className="rounded-md border-2 border-border bg-card p-4">
+      {title ? <p className="mb-2 text-xs text-muted-foreground">{title}</p> : null}
       {children}
     </div>
   )
@@ -25,7 +25,7 @@ export function BarChart({ title, series }: BarChartData) {
     // 所以说明「值相同」而不是断言「没有数据」——0 也是真实数据
     return (
       <ChartFrame title={title}>
-        <p className="py-8 text-center text-xs text-gray-400">
+        <p className="py-8 text-center text-xs text-muted-foreground">
           所有分类的值相同（{formatNumber(values[0] ?? 0)}），无法体现差异
         </p>
       </ChartFrame>
@@ -51,7 +51,7 @@ export function BarChart({ title, series }: BarChartData) {
           y1={zeroY}
           x2={W - PAD}
           y2={zeroY}
-          className="stroke-gray-300"
+          className="stroke-border"
           strokeDasharray="3 3"
         />
         {series.map((point, i) => {
@@ -65,7 +65,7 @@ export function BarChart({ title, series }: BarChartData) {
               width={barWidth}
               height={Math.max(1, Math.abs(zeroY - y))}
               rx={2}
-              className={point.value >= 0 ? 'fill-blue-500' : 'fill-red-400'}
+              className={point.value >= 0 ? 'fill-accent' : 'fill-destructive'}
             >
               <title>{`${point.label}: ${formatNumber(point.value)}`}</title>
             </rect>
@@ -73,7 +73,7 @@ export function BarChart({ title, series }: BarChartData) {
         })}
       </svg>
       {series.length <= 12 ? (
-        <div className="mt-1 flex gap-1 text-[11px] text-gray-600">
+        <div className="mt-1 flex gap-1 text-xs text-muted-foreground">
           {series.map((point) => (
             <span
               key={point.label}
@@ -113,16 +113,16 @@ export function LineChart({ title, points }: LineChartData) {
         <polyline
           points={coords.map((point) => `${point.x},${point.y}`).join(' ')}
           fill="none"
-          className="stroke-blue-500"
+          className="stroke-accent"
           strokeWidth={2}
         />
         {coords.map((point, i) => (
-          <circle key={point.x} cx={point.x} cy={point.y} r={2} className="fill-blue-500">
+          <circle key={point.x} cx={point.x} cy={point.y} r={2} className="fill-accent">
             <title>{`${points[i]?.label ?? ''}: ${formatNumber(values[i] ?? 0)}`}</title>
           </circle>
         ))}
       </svg>
-      <div className="mt-1 flex justify-between text-[11px] text-gray-500">
+      <div className="mt-1 flex justify-between text-xs text-muted-foreground">
         <span>{first?.label}</span>
         <span>{last?.label}</span>
       </div>

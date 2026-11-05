@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseRoadmapContent, roadmapContentSchema, roadmapToolSchema } from './spec'
+import {
+  parseRoadmapContent,
+  recomputeCurrentPhaseIndex,
+  roadmapContentSchema,
+  roadmapToolSchema,
+} from './spec'
 
 /** 合法的两级路线图：三个阶段，当前激活第二个 */
 function validRoadmap() {
@@ -186,5 +191,25 @@ describe('训练路线图规格', () => {
     const input = validRoadmap()
     input.phases[0].sessions[0].task = ''
     expect(parseRoadmapContent(input)).toBeNull()
+  })
+})
+
+describe('当前阶段重算', () => {
+  it('返回第一个仍有未完成训练的阶段', () => {
+    const content = parseRoadmapContent(validRoadmap())
+    expect(content).not.toBeNull()
+    if (!content) return
+    content.phases[0].sessions[0].status = 'done'
+    expect(recomputeCurrentPhaseIndex(content)).toBe(1)
+  })
+
+  it('全部完成后停在最后一段', () => {
+    const content = parseRoadmapContent(validRoadmap())
+    expect(content).not.toBeNull()
+    if (!content) return
+    for (const phase of content.phases) {
+      for (const session of phase.sessions) session.status = 'done'
+    }
+    expect(recomputeCurrentPhaseIndex(content)).toBe(content.phases.length - 1)
   })
 })

@@ -6,6 +6,8 @@ import { ArrowLeft, ImagePlus, Send } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react'
+import Markdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { GenUIPart, isGenUIPart } from '@/genui/render'
@@ -22,7 +24,8 @@ import {
 } from '../commands/types'
 import { usageCommand } from '../commands/usage'
 
-const API = 'http://localhost:3000'
+/** 同源 rewrite 代理到 API（next.config.ts），部署时不依赖固定端口 */
+const API = ''
 
 const fmt = (n: number) => n.toLocaleString('en-US')
 
@@ -40,6 +43,55 @@ const MAX_IMAGE_EDGE = 1568
 
 /** 单条消息图片数上限：data URL 随全量历史每轮重放并落库，需控制体积 */
 const MAX_IMAGES = 8
+
+/** 模型输出是 Markdown；只按需映射排版元素，不引入 @tailwindcss/typography */
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="mt-1.5 leading-relaxed first:mt-0">{children}</p>,
+  ul: ({ children }) => <ul className="mt-1.5 list-disc space-y-1 pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="mt-1.5 list-decimal space-y-1 pl-5">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  h1: ({ children }) => (
+    <h2 className="mt-2.5 font-heading text-base font-extrabold">{children}</h2>
+  ),
+  h2: ({ children }) => <h3 className="mt-2.5 font-heading text-sm font-extrabold">{children}</h3>,
+  h3: ({ children }) => <h4 className="mt-2.5 font-heading text-sm font-extrabold">{children}</h4>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="font-bold text-accent underline underline-offset-2"
+    >
+      {children}
+    </a>
+  ),
+  code: ({ className, children }) =>
+    className ? (
+      <code className={className}>{children}</code>
+    ) : (
+      <code className="rounded bg-muted px-1 py-0.5 text-[0.9em]">{children}</code>
+    ),
+  pre: ({ children }) => (
+    <pre className="mt-2 overflow-x-auto rounded-xl border-2 border-border bg-muted p-3 text-xs leading-relaxed">
+      {children}
+    </pre>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="mt-1.5 border-l-4 border-border pl-3 text-muted-foreground">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-3 border-border" />,
+  table: ({ children }) => (
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full border-collapse text-sm">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border-2 border-border px-2 py-1 text-left font-bold">{children}</th>
+  ),
+  td: ({ children }) => <td className="border-2 border-border px-2 py-1 text-left">{children}</td>,
+}
 
 /** File → FileUIPart：canvas 降采样 + 转 JPEG data URL（透明区垫白，GIF 取首帧） */
 async function fileToImagePart(file: File): Promise<FileUIPart> {
@@ -75,53 +127,82 @@ export default function ChatDetailPage() {
     messages: [],
   })
 
-  const [loadError, setLoadError] = useState(false)
+  const [loadError, setLoadError] = useState<'notfound' | 'failed' | null>(null)
+  const [chatTitle, setChatTitle] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   // 按路由 id 拉历史
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 只用于触发重新加载
   useEffect(() => {
     let cancelled = false
-    setLoadError(false)
+    setLoadError(null)
     fetch(`${API}/api/chats/${chatId}/messages`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`加载历史失败（${res.status}）`)
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!cancelled) setLoadError(res.status === 404 ? 'notfound' : 'failed')
+          return null
+        }
         return res.json()
       })
       .then((data) => {
-        if (!cancelled) setHistory({ chatId, messages: data.messages ?? [] })
+        if (cancelled || !data) return
+        setChatTitle(data.chat?.title ?? '')
+        setHistory({ chatId, messages: data.messages ?? [] })
       })
       .catch(() => {
-        if (!cancelled) setLoadError(true)
+        if (!cancelled) setLoadError('failed')
       })
     return () => {
       cancelled = true
     }
-  }, [chatId])
+  }, [chatId, reloadKey])
 
   if (loadError) {
     return (
       <main className="flex flex-col gap-4 p-6 text-sm">
-        <p className="text-destructive">会话不存在或加载失败。</p>
-        <Button asChild variant="outline" size="sm" className="self-start">
-          <Link href="/chat">返回对话列表</Link>
-        </Button>
+        <p
+          role="alert"
+          className="rounded-xl border-2 border-destructive bg-card px-4 py-3 leading-relaxed text-destructive"
+        >
+          {loadError === 'notfound'
+            ? '这个会话不存在或已被删除。'
+            : '加载历史失败，请检查网络后重试。'}
+        </p>
+        <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm" className="h-11">
+            <Link href="/chat">返回对话列表</Link>
+          </Button>
+          {loadError === 'failed' ? (
+            <Button size="sm" className="h-11" onClick={() => setReloadKey((key) => key + 1)}>
+              重试
+            </Button>
+          ) : null}
+        </div>
       </main>
     )
   }
 
   // 历史还没加载完前不渲染 ChatPanel（useChat 的 messages 只在首挂载生效）
   if (history.chatId !== chatId) {
-    return <main className="p-6 text-sm text-muted-foreground">加载历史…</main>
+    return (
+      <main className="p-6 text-sm text-muted-foreground">
+        <p role="status" aria-live="polite">
+          加载历史…
+        </p>
+      </main>
+    )
   }
 
   return (
     <main className="flex h-full flex-col bg-background">
-      <header className="flex shrink-0 items-center gap-2 border-b-2 border-foreground bg-card px-4 py-3">
-        <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link href="/chat">
+      <header className="flex shrink-0 items-center gap-2 border-b-2 border-foreground bg-card px-3 py-2">
+        <Button asChild variant="ghost" size="sm" className="-ml-1 h-11">
+          <Link href="/chat" aria-label="返回对话列表">
             <ArrowLeft />
             对话
           </Link>
         </Button>
+        <h1 className="min-w-0 flex-1 truncate text-sm font-bold">{chatTitle || '未命名会话'}</h1>
       </header>
 
       <ChatPanel key={chatId} chatId={chatId} initialMessages={history.messages} />
@@ -143,6 +224,16 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
   const fileInputRef = useRef<HTMLInputElement>(null)
   // 斜杠命令的面板数据（本地展示，不入消息流、不落库）
   const [panel, setPanel] = useState<ChatPanelView | null>(null)
+  // 消息区滚到底：首次进入与收到新消息时跟随，用户上滑后不打扰
+  const listRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 消息或状态变化时要重新滚到底，只读 DOM 尺寸
+  useEffect(() => {
+    const el = listRef.current
+    if (!el || !stickToBottomRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, status])
 
   /** 追加图片：非 image/* 的文件静默忽略；损坏图片跳过并警告，不阻塞其他图片 */
   const addImages = async (files: File[]) => {
@@ -194,7 +285,19 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+      <div
+        ref={listRef}
+        onScroll={() => {
+          const el = listRef.current
+          if (!el) return
+          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+        }}
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="对话消息"
+      >
         {panel?.kind === 'context' && (
           <ContextPanel snapshot={panel.snapshot} onClose={() => setPanel(null)} />
         )}
@@ -221,10 +324,16 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
                   : 'border-border bg-card text-card-foreground'
               }`}
             >
-              <p className="mb-1 text-xs opacity-60">{message.role === 'user' ? '你' : 'AI'}</p>
+              <p
+                className={`mb-1 text-xs font-bold ${
+                  message.role === 'user' ? 'text-accent-foreground' : 'text-muted-foreground'
+                }`}
+              >
+                {message.role === 'user' ? '你' : 'AI'}
+              </p>
               {reasoning && (
                 <details className="mb-2 rounded-md bg-background/30 px-2 py-1 text-sm">
-                  <summary className="cursor-pointer select-none text-xs opacity-60">
+                  <summary className="cursor-pointer text-xs font-bold text-muted-foreground select-none">
                     思考过程
                   </summary>
                   <p className="mt-1 whitespace-pre-wrap">{reasoning}</p>
@@ -233,11 +342,16 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
               {/* 按 parts 顺序渲染：文本段落与卡片保持模型输出的先后关系 */}
               {message.parts.map((part, i) => {
                 if (part.type === 'text') {
+                  if (!part.text.trim()) return null
                   return (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: part 没有稳定 id，顺序即身份
-                    <p key={`text:${i}`} className="whitespace-pre-wrap">
+                    <Markdown
+                      // biome-ignore lint/suspicious/noArrayIndexKey: part 没有稳定 id，顺序即身份
+                      key={`text:${i}`}
+                      remarkPlugins={[remarkGfm]}
+                      components={markdownComponents}
+                    >
                       {part.text}
-                    </p>
+                    </Markdown>
                   )
                 }
                 if (part.type === 'file' && part.mediaType.startsWith('image/')) {
@@ -275,7 +389,11 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
           )
         })}
         {status === 'submitted' && <p className="text-sm text-muted-foreground">思考中…</p>}
-        {error && <p className="text-sm text-destructive">出错了：{error.message}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            发送失败，请检查网络后重新发送。
+          </p>
+        )}
       </div>
 
       <div className="shrink-0 border-t-2 border-foreground bg-card px-3 py-2">

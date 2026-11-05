@@ -1,7 +1,7 @@
 import { generateText } from 'ai'
 import { defaultModel } from '../agent/model'
 import { ApiError } from '../lib/api-error'
-import { parseRoadmapContent, type RoadmapContent } from './spec'
+import { parseRoadmapContent, type RoadmapContent, recomputeCurrentPhaseIndex } from './spec'
 import { getRoadmap, updateRoadmapContent } from './store'
 
 /** 建议的边界：先肯定具体做到的部分，再指一个改点，最后给下一次的动作 */
@@ -13,6 +13,22 @@ const FEEDBACK_PROMPT = [
   '3. 给出下一次训练可以直接执行的一个动作。',
   '总共 2–4 句，不要重述整份计划，不要用「继续加油」这类空泛鼓励。',
 ].join('\n')
+
+/**
+ * 读取并校验一次训练；计划不存在 / 内容损坏 / 下标越界分别抛对应错误。
+ */
+function loadSession(
+  row: Awaited<ReturnType<typeof getRoadmap>>,
+  phaseIndex: number,
+  sessionIndex: number,
+): { content: RoadmapContent; session: RoadmapContent['phases'][number]['sessions'][number] } {
+  if (!row) throw new ApiError('ROADMAP_NOT_FOUND', 'Roadmap not found.', 404)
+  const content = parseRoadmapContent(row.content)
+  if (!content) throw new ApiError('ROADMAP_CORRUPTED', 'Roadmap content is invalid.', 500)
+  const session = content.phases[phaseIndex]?.sessions[sessionIndex]
+  if (!session) throw new ApiError('SESSION_NOT_FOUND', 'Session not found.', 404)
+  return { content, session }
+}
 
 /**
  * 完成某次训练：生成建议后把状态写回计划。
@@ -27,14 +43,7 @@ export async function completeSession(input: {
   signal?: AbortSignal
 }): Promise<RoadmapContent> {
   const row = await getRoadmap(input.roadmapId)
-  if (!row) throw new ApiError('ROADMAP_NOT_FOUND', 'Roadmap not found.', 404)
-
-  const content = parseRoadmapContent(row.content)
-  if (!content) throw new ApiError('ROADMAP_CORRUPTED', 'Roadmap content is invalid.', 500)
-
-  const phase = content.phases[input.phaseIndex]
-  const session = phase?.sessions[input.sessionIndex]
-  if (!phase || !session) throw new ApiError('SESSION_NOT_FOUND', 'Session not found.', 404)
+  const { content, session } = loadSession(row, input.phaseIndex, input.sessionIndex)
   if (session.status === 'done') {
     throw new ApiError('SESSION_ALREADY_DONE', 'Session already completed.', 409)
   }
@@ -67,6 +76,31 @@ export async function completeSession(input: {
   session.completionNote = input.note
   session.feedback = feedback
   session.completedAt = new Date().toISOString()
+  content.currentPhaseIndex = recomputeCurrentPhaseIndex(content)
+  await updateRoadmapContent(input.roadmapId, content)
+  return content
+}
+
+/**
+ * 撤销一次完成记录：清掉完成状态与反馈，并把当前阶段退回第一个未完成的阶段。
+ * 用于误点「完成这次」后无需重建整份计划。
+ */
+export async function uncompleteSession(input: {
+  roadmapId: string
+  phaseIndex: number
+  sessionIndex: number
+}): Promise<RoadmapContent> {
+  const row = await getRoadmap(input.roadmapId)
+  const { content, session } = loadSession(row, input.phaseIndex, input.sessionIndex)
+  if (session.status !== 'done') {
+    throw new ApiError('SESSION_NOT_DONE', 'Session is not completed.', 409)
+  }
+
+  session.status = undefined
+  session.completionNote = undefined
+  session.feedback = undefined
+  session.completedAt = undefined
+  content.currentPhaseIndex = recomputeCurrentPhaseIndex(content)
   await updateRoadmapContent(input.roadmapId, content)
   return content
 }

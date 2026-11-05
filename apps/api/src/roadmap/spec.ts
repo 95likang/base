@@ -124,6 +124,17 @@ export function areSessionTimesValid(
 }
 
 /**
+ * 根据完成情况重算当前激活阶段：第一个还有未完成训练的阶段；
+ * 全部完成后停在最后一段，避免下标越界。
+ */
+export function recomputeCurrentPhaseIndex(content: RoadmapContent): number {
+  const index = content.phases.findIndex((phase) =>
+    phase.sessions.some((session) => session.status !== 'done'),
+  )
+  return index === -1 ? content.phases.length - 1 : index
+}
+
+/**
  * 校验并重建路线图内容。
  *
  * schema 本身能被 z.toJSONSchema 完整表达（故不使用 refine），

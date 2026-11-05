@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from 'next'
-import { Outfit, Plus_Jakarta_Sans } from 'next/font/google'
+import { Noto_Sans_SC, Outfit, Plus_Jakarta_Sans } from 'next/font/google'
 import type { ReactNode } from 'react'
 import { BottomTabs } from '@/components/layout/bottom-tabs'
+import { SideNav } from '@/components/layout/side-nav'
 import './globals.css'
 
 const outfit = Outfit({
@@ -16,9 +17,17 @@ const jakarta = Plus_Jakarta_Sans({
   variable: '--font-jakarta',
 })
 
+/** 中文标题字体：按 unicode-range 分片，浏览器只取用到的字块 */
+const notoSC = Noto_Sans_SC({
+  weight: 'variable',
+  subsets: ['latin'],
+  variable: '--font-noto-sc',
+  preload: false,
+})
+
 export const metadata: Metadata = {
   title: 'Practice Coach',
-  description: '移动端训练计划与 AI 对话',
+  description: '训练计划与 AI 对话',
 }
 
 export const viewport: Viewport = {
@@ -27,11 +36,14 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN" className={`${outfit.variable} ${jakarta.variable}`}>
+    <html lang="zh-CN" className={`${outfit.variable} ${jakarta.variable} ${notoSC.variable}`}>
       <body>
-        {/* H5 壳层：手机满宽，桌面居中显示为手机尺寸 */}
-        <div className="mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden md:border-x-2">
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {/* 移动端是手机满宽；桌面端换成左侧导航 + 居中内容列 */}
+        <div className="mx-auto flex h-dvh w-full max-w-md flex-col overflow-hidden md:border-x-2 lg:max-w-5xl lg:flex-row lg:gap-8 lg:border-x-0 lg:px-6 lg:py-8">
+          <SideNav />
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-auto lg:max-w-2xl">
+            {children}
+          </div>
           <BottomTabs />
         </div>
       </body>

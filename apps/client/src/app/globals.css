@@ -8,8 +8,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: var(--font-jakarta);
-  --font-heading: var(--font-outfit);
+  --font-sans:
+    var(--font-jakarta), ui-sans-serif, system-ui, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-heading:
+    var(--font-outfit), var(--font-noto-sc), ui-sans-serif, system-ui, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -30,6 +34,7 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-skeleton: var(--skeleton);
   --color-input: var(--input);
   --color-ring: var(--ring);
 
@@ -43,7 +48,7 @@
   --shadow-pop-lg: 6px 6px 0 0 var(--foreground);
   --shadow-pop-accent: 4px 4px 0 0 var(--accent);
   --shadow-pop-destructive: 4px 4px 0 0 var(--destructive);
-  --shadow-card: 8px 8px 0 0 var(--border);
+  --shadow-card: 6px 6px 0 0 #cbd5e1;
   --shadow-card-pink: 8px 8px 0 0 var(--secondary);
 }
 
@@ -54,7 +59,7 @@
   --card-foreground: #1e293b;
   --popover: #ffffff;
   --popover-foreground: #1e293b;
-  --primary: #8b5cf6;
+  --primary: #7c3aed;
   --primary-foreground: #ffffff;
   --secondary: #f472b6;
   --secondary-foreground: #1e293b;
@@ -62,13 +67,15 @@
   --quaternary: #34d399;
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
-  --accent: #8b5cf6;
+  --accent: #7c3aed;
   --accent-foreground: #ffffff;
-  --destructive: #ef4444;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --border: #e2e8f0;
+  /* 骨架需要比 muted 更实，才能在暖米白底上被看见（约 1.6:1） */
+  --skeleton: #c3cedd;
   --input: #cbd5e1;
-  --ring: #8b5cf6;
+  --ring: #7c3aed;
 }
 
 @layer base {

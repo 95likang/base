@@ -1,27 +1,11 @@
 'use client'
 
-import { Map as MapIcon, MessageCircle, User } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { TABS } from './nav-items'
 
-const TABS = [
-  {
-    href: '/plans',
-    label: '计划',
-    icon: MapIcon,
-    isActive: (path: string) => path.startsWith('/plans'),
-  },
-  {
-    href: '/chat',
-    label: '对话',
-    icon: MessageCircle,
-    isActive: (path: string) => path.startsWith('/chat'),
-  },
-  { href: '/me', label: '我的', icon: User, isActive: (path: string) => path === '/me' },
-]
-
-/** H5 底部主导航：计划 / 对话 / 我的，登录页不展示。 */
+/** H5 底部主导航：计划 / 对话 / 我的，登录页不展示；桌面端交给侧栏。 */
 export function BottomTabs() {
   const pathname = usePathname()
   if (pathname === '/login') return null
@@ -29,7 +13,7 @@ export function BottomTabs() {
   return (
     <nav
       aria-label="主导航"
-      className="shrink-0 border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)]"
+      className="shrink-0 border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)] lg:hidden"
     >
       <ul className="grid grid-cols-3 px-2 py-1.5">
         {TABS.map(({ href, label, icon: Icon, isActive }) => {

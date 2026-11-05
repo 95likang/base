@@ -61,7 +61,10 @@ function findProcessName(pid) {
   return new Promise((resolve) => {
     const cmd =
       process.platform === 'win32'
-        ? { file: 'powershell', args: ['-NoProfile', '-Command', `(Get-Process -Id ${pid}).ProcessName`] }
+        ? {
+            file: 'powershell',
+            args: ['-NoProfile', '-Command', `(Get-Process -Id ${pid}).ProcessName`],
+          }
         : { file: 'ps', args: ['-p', String(pid), '-o', 'comm='] }
     execFile(cmd.file, cmd.args, { windowsHide: true }, (err, stdout) => {
       resolve(err ? null : stdout.trim() || null)

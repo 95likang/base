@@ -70,7 +70,8 @@ export const chatsRoute = new Hono()
     return c.json({ ok: true })
   })
   .get('/:id/messages', async (c) => {
-    return c.json({ messages: await listMessages(c.req.param('id')) })
+    const target = await getChatOrThrow(c.req.param('id'))
+    return c.json({ chat: target, messages: await listMessages(target.id) })
   })
 
 /**

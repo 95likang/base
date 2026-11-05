@@ -2,10 +2,10 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { ApiError, validationHook } from '../lib/api-error'
-import { completeSession } from '../roadmap/service'
+import { completeSession, uncompleteSession } from '../roadmap/service'
 import { deleteRoadmap, getRoadmap, listRoadmaps } from '../roadmap/store'
 
-const completeParamSchema = z.object({
+const sessionParamSchema = z.object({
   id: z.string().min(1),
   phaseIndex: z.coerce.number().int().min(0),
   sessionIndex: z.coerce.number().int().min(0),
@@ -22,6 +22,8 @@ const completeBodySchema = z.object({
  * DELETE /:id                                     删除计划；不存在返回 404
  * POST /:id/sessions/:phaseIndex/:sessionIndex/complete
  *                                                 记录一次完成，生成建议并写回
+ * POST /:id/sessions/:phaseIndex/:sessionIndex/uncomplete
+ *                                                 撤销完成记录（误点兜底）
  *
  * 无认证：与 /api/chats、/api/memory 一致。
  */
@@ -44,7 +46,7 @@ export const roadmapsRoute = new Hono()
   })
   .post(
     '/:id/sessions/:phaseIndex/:sessionIndex/complete',
-    zValidator('param', completeParamSchema, validationHook),
+    zValidator('param', sessionParamSchema, validationHook),
     zValidator('json', completeBodySchema, validationHook),
     async (c) => {
       const { id, phaseIndex, sessionIndex } = c.req.valid('param')
@@ -56,6 +58,15 @@ export const roadmapsRoute = new Hono()
         note,
         signal: c.req.raw.signal,
       })
+      return c.json({ content })
+    },
+  )
+  .post(
+    '/:id/sessions/:phaseIndex/:sessionIndex/uncomplete',
+    zValidator('param', sessionParamSchema, validationHook),
+    async (c) => {
+      const { id, phaseIndex, sessionIndex } = c.req.valid('param')
+      const content = await uncompleteSession({ roadmapId: id, phaseIndex, sessionIndex })
       return c.json({ content })
     },
   )

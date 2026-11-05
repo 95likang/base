@@ -5,16 +5,23 @@ import {
   parseRoadmapContent,
   type RoadmapContent,
 } from 'api/roadmap/spec'
+import { CheckCircle2, ChevronDown, RotateCcw } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { dayOffset } from '@/lib/date'
 
 /** UI 消息里 tool part 的最小形状（AI SDK 的联合类型在这里不需要细分） */
 type RoadmapPartShape = {
   type: string
-  toolCallId?: string
   state?: string
   input?: unknown
+  output?: unknown
 }
+
+type SessionData = RoadmapContent['phases'][number]['sessions'][number]
 
 /** 路线图候选：名字与工具共用 spec 里的常量，避免两处字符串漂移 */
 export function isRoadmapPart(part: { type: string }): part is RoadmapPartShape {
@@ -23,23 +30,47 @@ export function isRoadmapPart(part: { type: string }): part is RoadmapPartShape 
 
 function RoadmapSkeleton() {
   return (
-    <div
-      role="status"
-      className="h-40 w-full animate-pulse rounded-lg border border-dashed bg-gray-50"
-      aria-label="正在生成训练路线图"
-    />
+    <div role="status" className="rounded-xl border-2 border-border bg-card p-4 shadow-card">
+      <span className="sr-only">正在生成训练路线图…</span>
+      <div aria-hidden="true">
+        <Skeleton className="h-3 w-24 rounded-sm" />
+        <Skeleton className="mt-2 h-5 w-2/3 rounded-sm" />
+        <Skeleton className="mt-2 h-4 w-full rounded-sm" />
+        <Skeleton className="mt-1.5 h-4 w-4/5 rounded-sm" />
+        <Skeleton className="mt-3 h-4 w-1/2 rounded-sm" />
+        <Skeleton className="mt-3 h-12 w-full rounded-full" />
+      </div>
+    </div>
   )
 }
 
 function RoadmapFailure({ detail }: { detail: string }) {
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <div
+      role="alert"
+      className="rounded-xl border-2 border-foreground bg-tertiary/25 px-4 py-3 text-sm leading-relaxed"
+    >
       训练路线图：{detail}
     </div>
   )
 }
 
-type RoadmapSessionData = RoadmapContent['phases'][number]['sessions'][number]
+/** 整体进度：全计划的已完成次数 / 总次数 */
+function progressOf(content: RoadmapContent) {
+  const sessions = content.phases.flatMap((phase) => phase.sessions)
+  return {
+    done: sessions.filter((session) => session.status === 'done').length,
+    total: sessions.length,
+  }
+}
+
+/** 判据可能是一条，也可能是分号隔开的多条；全部列出，避免用户为没看到的内容背书 */
+function criteriaLines(criteria: string): string[] {
+  return criteria
+    .split(/[；;]/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
 
 /**
  * 完成一次训练：展开输入框 → 提交给接口 → 由服务端生成建议并落库。
@@ -54,41 +85,78 @@ function SessionActions({
   roadmapId: string
   phaseIndex: number
   sessionIndex: number
-  session: RoadmapSessionData
+  session: SessionData
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [undoing, setUndoing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const undo = async () => {
+    setUndoing(true)
+    setError(null)
+    try {
+      const res = await fetch(
+        `/api/roadmaps/${roadmapId}/sessions/${phaseIndex}/${sessionIndex}/uncomplete`,
+        { method: 'POST' },
+      )
+      if (!res.ok) throw new Error('撤销失败，请重试。')
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '撤销失败，请重试。')
+      setUndoing(false)
+    }
+  }
 
   if (session.status === 'done') {
     return (
-      <div className="mt-2 rounded border border-green-200 bg-green-50 p-2 text-green-900">
-        <p className="font-medium">已完成</p>
-        {session.completionNote ? <p className="mt-1">完成说明：{session.completionNote}</p> : null}
-        {session.feedback ? (
-          <p className="mt-1 whitespace-pre-wrap">教练建议：{session.feedback}</p>
+      <div className="mt-3 rounded-md border-2 border-foreground bg-quaternary/20 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-1.5 font-heading text-sm font-extrabold">
+            <CheckCircle2 className="size-4" strokeWidth={2.5} />
+            已完成
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-11 text-xs"
+            disabled={undoing}
+            onClick={undo}
+          >
+            <RotateCcw className="size-3.5" />
+            {undoing ? '撤销中…' : '撤销完成'}
+          </Button>
+        </div>
+        {session.completionNote ? (
+          <p className="mt-1.5 text-sm leading-relaxed">完成说明：{session.completionNote}</p>
         ) : null}
+        {session.feedback ? (
+          <div className="mt-2 rounded-sm border-2 border-border bg-card p-2.5">
+            <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+              教练建议
+            </p>
+            <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{session.feedback}</p>
+          </div>
+        ) : null}
+        {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
       </div>
     )
   }
 
   if (!open) {
+    const ahead = dayOffset(session.date)
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mt-2 rounded border px-2 py-1 hover:bg-gray-50"
-      >
-        完成这次
-      </button>
+      <Button variant="outline" className="mt-3 w-full" onClick={() => setOpen(true)}>
+        {ahead !== null && ahead > 0 ? '提前完成这次' : '完成这次'}
+      </Button>
     )
   }
 
   const submit = async () => {
     const text = note.trim()
-    if (!text) return
     setSubmitting(true)
     setError(null)
     try {
@@ -104,162 +172,327 @@ function SessionActions({
         const body = (await res.json().catch(() => null)) as {
           error?: { message?: string }
         } | null
-        throw new Error(body?.error?.message ?? '提交失败，请重试')
+        throw new Error(body?.error?.message ?? '提交失败，请重试。')
       }
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '提交失败，请重试')
+      setError(err instanceof Error ? err.message : '提交失败，请重试。')
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="mt-2 rounded border bg-gray-50 p-2">
+    <div className="mt-3 flex flex-col gap-2 rounded-md border-2 border-border bg-muted/40 p-3">
       <textarea
         value={note}
         onChange={(e) => setNote(e.target.value)}
         rows={3}
         maxLength={1000}
-        placeholder="这次完成了什么？哪里卡住了？"
-        className="w-full rounded border p-1 text-xs"
+        placeholder="这次完成了什么？没做完也没关系，写清卡在哪。"
+        className="min-h-28 w-full rounded-md border-2 border-input bg-card p-2 text-base leading-relaxed outline-none focus-visible:border-accent"
       />
-      <div className="mt-1 flex items-center gap-2">
-        <button
+      <label className="flex min-h-11 cursor-pointer items-start gap-2 text-sm leading-relaxed">
+        <input
+          type="checkbox"
+          checked={confirmed}
+          onChange={(e) => setConfirmed(e.target.checked)}
+          className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+        />
+        上面每条判据都做到了
+      </label>
+      <div className="flex items-center gap-2">
+        <Button
           type="button"
+          className="h-12 flex-1"
           onClick={submit}
-          disabled={submitting || !note.trim()}
-          className="rounded bg-black px-2 py-1 text-white disabled:opacity-40"
+          disabled={submitting || !note.trim() || !confirmed}
         >
-          {submitting ? '生成建议中…' : '提交'}
-        </button>
-        <button
+          {submitting ? '教练正在看你的记录…' : '完成并获取建议'}
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          className="h-12"
           onClick={() => setOpen(false)}
           disabled={submitting}
-          className="rounded border px-2 py-1"
         >
           取消
-        </button>
-        {error ? <span className="text-red-600">{error}</span> : null}
+        </Button>
       </div>
+      {!submitting && (!note.trim() || !confirmed) ? (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {!note.trim() ? '写下这次完成了什么才能提交。' : '确认上面每条判据都做到后即可提交。'}
+        </p>
+      ) : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   )
 }
 
 /**
- * 两级路线图卡片：阶段 → 阶段内每次训练。
- * 只有当前阶段高亮，其余置灰标「未激活」——路线图给全局，执行仍只攻一个单点。
+ * 两级路线图：阶段 → 阶段内每次训练。
+ * 默认只展开当前阶段，其余折叠——路线图给全局，执行仍只攻一个单点。
  * 导出给「我的计划」详情页复用；传入 roadmapId 时每次训练可标记完成。
  */
 export function RoadmapCard({
   content,
   roadmapId,
+  focusPhaseIndex,
+  titleAs: Title = 'h2',
 }: {
   content: RoadmapContent
   roadmapId?: string
+  /** 从列表「查看这次」跳转时，额外展开下一训练所在阶段 */
+  focusPhaseIndex?: number
+  /** 详情页用 h1，对话内嵌卡片用 h2，避免一页多个 h1 */
+  titleAs?: 'h1' | 'h2'
 }) {
+  const { done, total } = progressOf(content)
+  const percent = Math.round((done / total) * 100)
+  const meta = [
+    content.startDate && content.endDate ? `${content.startDate} 至 ${content.endDate}` : null,
+    content.overallDuration ? `总周期 ${content.overallDuration}` : null,
+    content.sessionsPerWeek ? `每周 ${content.sessionsPerWeek} 次` : null,
+    content.sessionMinutes ? `每次 ${content.sessionMinutes} 分钟` : null,
+  ].filter((text): text is string => Boolean(text))
+
   return (
-    <div className="rounded-lg border bg-white p-4 text-xs">
-      <div className="mb-3">
-        <p className="text-sm font-semibold">{content.title}</p>
-        <p className="mt-1 text-gray-600">目标：{content.goal}</p>
-        {content.summary ? <p className="mt-1 text-gray-600">概述：{content.summary}</p> : null}
-        {content.overallDuration || content.sessionsPerWeek || content.sessionMinutes ? (
-          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-gray-500">
-            {content.startDate && content.endDate ? (
-              <span>
-                {content.startDate} 至 {content.endDate}
-              </span>
-            ) : null}
-            {content.overallDuration ? <span>总周期：{content.overallDuration}</span> : null}
-            {content.sessionsPerWeek ? <span>每周 {content.sessionsPerWeek} 次</span> : null}
-            {content.sessionMinutes ? <span>每次 {content.sessionMinutes} 分钟</span> : null}
-          </div>
+    <section className="flex flex-col gap-4">
+      <header className="rounded-xl border-2 border-foreground bg-card p-4 shadow-card">
+        <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+          训练路线图
+        </p>
+        <Title className="mt-1 font-heading text-xl leading-snug font-extrabold">
+          {content.title}
+        </Title>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{content.goal}</p>
+        {content.summary ? (
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{content.summary}</p>
         ) : null}
-      </div>
-      <ol className="space-y-3">
+
+        {meta.length > 0 ? (
+          <p className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            {meta.map((text) => (
+              <span key={text}>{text}</span>
+            ))}
+          </p>
+        ) : null}
+
+        <div className="mt-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+              进度
+            </span>
+            <span className="font-heading text-sm font-extrabold tabular-nums">
+              {done} / {total}
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="计划完成进度"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={done}
+            className="mt-1.5 h-3 overflow-hidden rounded-full border-2 border-foreground bg-muted"
+          >
+            <div
+              className="h-full bg-quaternary transition-[width] duration-500"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      </header>
+
+      <ol className="flex flex-col gap-3">
         {content.phases.map((phase, phaseIndex) => {
           const active = phaseIndex === content.currentPhaseIndex
+          const allDone = phase.sessions.every((session) => session.status === 'done')
+          const status = active ? '当前阶段' : allDone ? '已完成' : '未开始'
+
           return (
-            <li
-              // biome-ignore lint/suspicious/noArrayIndexKey: 阶段没有稳定 id，顺序即身份
-              key={phaseIndex}
-              className={
-                active
-                  ? 'rounded-lg border border-blue-300 bg-blue-50/40 p-3'
-                  : 'rounded-lg border border-dashed p-3 opacity-60'
-              }
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">
-                  阶段 {phaseIndex + 1} · {phase.title}
-                </p>
-                <span
-                  className={
-                    active
-                      ? 'rounded bg-blue-600 px-1.5 py-0.5 text-white'
-                      : 'rounded bg-gray-200 px-1.5 py-0.5 text-gray-600'
-                  }
-                >
-                  {active ? '当前阶段' : '未激活'}
-                </span>
-              </div>
-              <dl className="mt-2 space-y-1 text-gray-700">
-                <div>
-                  <dt className="inline text-gray-500">阶段目标：</dt>
-                  <dd className="inline">{phase.goal}</dd>
-                </div>
-                <div>
-                  <dt className="inline text-gray-500">单点：</dt>
-                  <dd className="inline">{phase.focus}</dd>
-                </div>
-                <div>
-                  <dt className="inline text-gray-500">判据：</dt>
-                  <dd className="inline">{phase.criteria}</dd>
-                </div>
-              </dl>
-              <ol className="mt-2 space-y-2">
-                {phase.sessions.map((session, sessionIndex) => (
-                  <li
-                    // biome-ignore lint/suspicious/noArrayIndexKey: 训练没有稳定 id，顺序即身份
-                    key={sessionIndex}
-                    className="rounded border bg-white/70 p-2"
+            // biome-ignore lint/suspicious/noArrayIndexKey: 阶段没有稳定 id，顺序即身份
+            <li key={phaseIndex}>
+              <details
+                open={active || phaseIndex === focusPhaseIndex}
+                className="group rounded-xl border-2 border-foreground bg-card shadow-card"
+              >
+                <summary className="flex cursor-pointer list-none items-start gap-2 p-4 [&::-webkit-details-marker]:hidden">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+                      阶段 {phaseIndex + 1} / {content.phases.length}
+                    </p>
+                    <h2 className="mt-0.5 font-heading text-base leading-snug font-extrabold">
+                      {phase.title}
+                    </h2>
+                  </div>
+                  <span
+                    className={
+                      active
+                        ? 'shrink-0 rounded-full border-2 border-foreground bg-accent px-2 py-0.5 text-xs font-bold text-accent-foreground'
+                        : allDone
+                          ? 'shrink-0 rounded-full border-2 border-foreground bg-quaternary px-2 py-0.5 text-xs font-bold'
+                          : 'shrink-0 rounded-full border-2 border-border px-2 py-0.5 text-xs font-bold text-muted-foreground'
+                    }
                   >
-                    <p className="font-medium">
-                      {sessionIndex + 1}. {session.subskill}
-                    </p>
-                    {session.date && session.startTime && session.endTime ? (
-                      <p className="mt-1 text-gray-500">
-                        {session.date} {session.startTime}–{session.endTime}
-                      </p>
-                    ) : null}
-                    <p className="mt-1">{session.task}</p>
-                    <p className="mt-1 text-gray-500">
-                      算成：{session.criteria} · {session.minutes} 分钟
-                    </p>
-                    <p className="text-gray-500">产物：{session.product}</p>
-                    {roadmapId ? (
-                      <SessionActions
-                        roadmapId={roadmapId}
-                        phaseIndex={phaseIndex}
-                        sessionIndex={sessionIndex}
-                        session={session}
-                      />
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
+                    {status}
+                  </span>
+                  <ChevronDown
+                    className="mt-1 size-5 shrink-0 transition-transform group-open:rotate-180"
+                    strokeWidth={2.5}
+                    aria-hidden
+                  />
+                </summary>
+
+                <div className="flex flex-col gap-3 border-t-2 border-border px-4 py-3">
+                  <dl className="grid gap-2 text-sm leading-relaxed">
+                    <div className="flex gap-2">
+                      <dt className="w-16 shrink-0 font-bold text-muted-foreground">阶段目标</dt>
+                      <dd className="min-w-0">{phase.goal}</dd>
+                    </div>
+                    <div className="flex gap-2">
+                      <dt className="w-16 shrink-0 font-bold text-muted-foreground">单点</dt>
+                      <dd className="min-w-0">{phase.focus}</dd>
+                    </div>
+                    <div className="flex gap-2">
+                      <dt className="w-16 shrink-0 font-bold text-muted-foreground">判据</dt>
+                      <dd className="min-w-0">{phase.criteria}</dd>
+                    </div>
+                  </dl>
+
+                  <p className="text-sm text-muted-foreground">
+                    {active
+                      ? '先只攻这一个单点；本阶段全部完成后自动进入下一阶段。'
+                      : allDone
+                        ? '本阶段全部完成。'
+                        : '完成上一阶段的全部训练后开始。'}
+                  </p>
+
+                  <ol className="flex flex-col gap-3">
+                    {phase.sessions.map((session, sessionIndex) => {
+                      const completed = session.status === 'done'
+                      return (
+                        <li
+                          // biome-ignore lint/suspicious/noArrayIndexKey: 训练没有稳定 id，顺序即身份
+                          key={sessionIndex}
+                          id={`session-${phaseIndex}-${sessionIndex}`}
+                          className={
+                            completed
+                              ? 'scroll-mt-24 rounded-md border-2 border-foreground bg-quaternary/10 p-3'
+                              : 'scroll-mt-24 rounded-md border-2 border-border bg-card p-3'
+                          }
+                        >
+                          <h3 className="font-heading text-sm leading-snug font-extrabold">
+                            {sessionIndex + 1}. {session.subskill}
+                          </h3>
+                          {session.date && session.startTime && session.endTime ? (
+                            <p className="mt-1 font-heading text-base font-extrabold tabular-nums">
+                              {session.date} {session.startTime}–{session.endTime}
+                            </p>
+                          ) : null}
+                          <p className="mt-1.5 text-sm leading-relaxed">{session.task}</p>
+
+                          <div className="mt-2 rounded-sm border-2 border-border bg-muted/50 p-2.5">
+                            <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+                              完成判据
+                            </p>
+                            <ul className="mt-1 space-y-1 text-sm leading-relaxed">
+                              {criteriaLines(session.criteria).map((line) => (
+                                <li key={line} className="flex gap-1.5">
+                                  <span
+                                    aria-hidden
+                                    className="mt-2 size-1.5 shrink-0 rounded-full bg-accent"
+                                  />
+                                  <span className="min-w-0">{line}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <p className="mt-1.5 text-sm text-muted-foreground">
+                            产物：{session.product} · {session.minutes} 分钟
+                          </p>
+
+                          {roadmapId ? (
+                            <SessionActions
+                              roadmapId={roadmapId}
+                              phaseIndex={phaseIndex}
+                              sessionIndex={sessionIndex}
+                              session={session}
+                            />
+                          ) : null}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </div>
+              </details>
             </li>
           )
         })}
       </ol>
-    </div>
+    </section>
+  )
+}
+
+/** 工具返回 { roadmapId }；历史消息里该值可能被存成 JSON 字符串 */
+function roadmapIdOf(output: unknown): string | null {
+  let value = output
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== 'object') return null
+  const id = (value as { roadmapId?: unknown }).roadmapId
+  return typeof id === 'string' ? id : null
+}
+
+/**
+ * 对话内的路线图摘要卡：对话只是生成现场，执行去「我的计划」。
+ * 不在这里展示进度——tool part 是生成时快照，和计划页的实时进度会打架。
+ */
+function RoadmapSummary({
+  content,
+  roadmapId,
+}: {
+  content: RoadmapContent
+  roadmapId: string | null
+}) {
+  const { total } = progressOf(content)
+
+  return (
+    <section className="rounded-xl border-2 border-foreground bg-card p-4 shadow-card">
+      <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
+        训练路线图已生成
+      </p>
+      <h2 className="mt-1 font-heading text-lg leading-snug font-extrabold">{content.title}</h2>
+      <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+        {content.goal}
+      </p>
+
+      <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+        <span>{content.phases.length} 个阶段</span>
+        <span>{total} 次训练</span>
+        {content.sessionMinutes ? <span>每次 {content.sessionMinutes} 分钟</span> : null}
+        {content.startDate && content.endDate ? (
+          <span>
+            {content.startDate} 至 {content.endDate}
+          </span>
+        ) : null}
+      </p>
+
+      <Button asChild className="mt-3 w-full">
+        <Link href={roadmapId ? `/plans/${roadmapId}` : '/plans'}>打开我的计划</Link>
+      </Button>
+    </section>
   )
 }
 
 /**
  * 一个 part 走完「校验 → 重建 → 渲染」。
- * 只在 output-available 时画正式卡片：此时写库已经成功，
+ * 只在 output-available 时画卡片：此时写库已经成功，
  * 屏幕上看到的与数据库里的才是同一份。
  */
 export function RoadmapPart({ part }: { part: RoadmapPartShape }) {
@@ -281,5 +514,5 @@ export function RoadmapPart({ part }: { part: RoadmapPartShape }) {
     return <RoadmapFailure detail="内容格式不合法，这张路线图未能显示。" />
   }
 
-  return <RoadmapCard content={content} />
+  return <RoadmapSummary content={content} roadmapId={roadmapIdOf(part.output)} />
 }

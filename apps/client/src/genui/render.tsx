@@ -1,6 +1,7 @@
 'use client'
 
 import { isGenUIToolName, RENDERABLE_PART_STATES, validateRenderInput } from 'api/genui/spec'
+import { Skeleton } from '@/components/ui/skeleton'
 import { GenUIErrorBoundary } from './error-boundary'
 import { registry } from './registry'
 
@@ -19,17 +20,19 @@ export function isGenUIPart(part: { type: string }): part is RenderablePart {
 
 function GenUISkeleton() {
   return (
-    <div
-      role="status"
-      className="h-24 w-full animate-pulse rounded-lg border border-dashed bg-gray-50"
-      aria-label="正在生成图表"
-    />
+    <div role="status" className="rounded-md border-2 border-border bg-card p-4">
+      <span className="sr-only">正在生成图表…</span>
+      <div aria-hidden="true" className="flex flex-col gap-2">
+        <Skeleton className="h-3 w-20 rounded-sm" />
+        <Skeleton className="h-24 w-full rounded-sm" />
+      </div>
+    </div>
   )
 }
 
 function GenUIFailure({ name, detail }: { name: string; detail: string }) {
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <div className="rounded-md border-2 border-tertiary bg-card px-4 py-3 text-sm leading-relaxed">
       {name}：{detail}
     </div>
   )

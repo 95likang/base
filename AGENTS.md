@@ -7,6 +7,9 @@
 - 用最简单的方式实现，不要考虑本次需求之外的扩展性，能用现有依赖和工具函数就不要造轮子。
 - 每次完成需求需要开一个subagent检查：这段实现里，哪些代码是可以删掉的？哪些抽象是本次需求用不到的？
 - 完成需求后用code-review-expert这个skills 进行code review
+- 用 agent-browser 连接 CDP 端口 9333 做页面验证。
+  所有命令都带上 --cdp 9333，例如：
+  agent-browser --cdp 9333 open http://localhost:3000
 
 ## 错误题本
 
@@ -23,6 +26,9 @@
 - 并发跑两个 `pnpm add` 后 `package.json` 丢失新装依赖 → 两个 pnpm 进程同时改写同一 `package.json` / `pnpm-lock.yaml`，后写入者覆盖 → 同一 workspace 的依赖安装必须串行，等上一个进程结束再执行下一个。
 - 安装 `@langfuse/otel` 报 peer 冲突（`@opentelemetry/core` 3.0.0 vs `^2.0.1`、`api` 1.10.0 vs `<1.10.0`）→ 最新 `@opentelemetry/sdk-node@0.300` 依赖 core 3.x，与 Langfuse 6.0.2 的 peer 不兼容 → 固定 `@opentelemetry/sdk-node@0.211.0` 与 `@opentelemetry/api@1.9.1`。
 - 纯图消息（无文字）模型称"收到截断的 base64 文本、无视觉能力" → Anthropic 协议网关按用户消息 text 意图路由视觉通道，无文字或泛化词（"图片"/`[图片]`）触发降级，图片被转成 ~850 tok 的截断文本（对照 trace usage：降级 4313 vs 视觉 3466 inputTokens）→ 后端给 image-only 消息补明确识图指令（`ensureTextPartForImageOnlyMessages`，chat.ts），仅内存不落库。
+- 页面看起来正常但点击无反应、`main` 等节点没有 `__reactFiber` → `<dialog>` 被放在 `<span>` 里属于无效嵌套（span 只允许短语内容），浏览器解析结果与 SSR HTML 不一致，该段 hydration 整段失败 → 外层容器改用 `div` 等允许流内容的元素。
+- 复验页面时误判"hydration 失败/按钮无反应" → build 后重启 dev，旧标签页仍持有失效 chunk，HMR 拉取 hot-update 报 `ERR_ABORTED` → 验证前开新标签页或加缓存穿透参数重新加载，别在旧页面上判断。
+- 以为 `next/font/google` 的 Noto Sans SC 拿不到中文字形（metadata 里 `subsets` 只有 latin/cyrillic 等，没有 chinese-simplified）→ 实际 next/font 会按整份 CSS 下载全部 unicode-range 分片，`subsets` 只影响 preload → 想要中文标题字体时无需自建子集，配 `weight: 'variable'`（一份切片覆盖 100–900，避免 800 字重被浏览器合成）并 `preload: false` 即可。
 
 <!-- BEGIN:turborepo-agent-rules -->
 
