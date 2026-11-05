@@ -20,6 +20,7 @@ import { createMemoryTool } from './memory-tools'
 import { notifyDiscordTool } from './notify-tools'
 import { createRagTools } from './rag-tools'
 import { ToolRegistry } from './registry'
+import { createRoadmapTool } from './roadmap-tools'
 import { pickSearchTool, startPreviewTool, webFetchTool } from './search-tools'
 import { bashTool } from './shell-tools'
 import { createSkillTool } from './skill-tools'
@@ -37,6 +38,8 @@ import { calculatorTool, weatherTool } from './utility-tools'
 export async function createDefaultToolRegistry(options?: {
   /** 调用方的 token 预算：子 Agent 的消耗同步计入，避免绕过父循环上限 */
   budget?: BudgetState
+  /** 当前会话 id：路线图需要归属到会话，cron/channel 无会话时不注册该工具 */
+  chatId?: string
 }): Promise<ToolRegistry> {
   const registry = new ToolRegistry()
   registry.register(
@@ -73,6 +76,10 @@ export async function createDefaultToolRegistry(options?: {
   registry.register(...pluginManager.getTools())
   // 生成式 UI：纯渲染型工具，模型只填参数，组件由前端注册表渲染
   registry.register(...createGenUITools())
+  // 训练路线图：写库 + 前端卡片。只在有会话时注册，避免产生无法展示的孤儿行
+  if (options?.chatId) {
+    registry.register(createRoadmapTool({ chatId: options.chatId }))
+  }
   // 安全层：继承进程级角色，挂上共享的 hook 管线
   registry.setRole(getRole())
   registry.setHookPipeline(hookPipeline)

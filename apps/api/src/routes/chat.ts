@@ -119,7 +119,7 @@ export const chatRoute = new Hono().post(
     // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
     // 文件工具限制在 TOOL_WORKSPACE_DIR 指定的工作区内（默认 <cwd>/workspace），
     // 路径越界一律拒绝；TOOL_WORKSPACE_GUARD=false 可关闭该守卫（仅限本地开发）。
-    const registry = await createDefaultToolRegistry({ budget })
+    const registry = await createDefaultToolRegistry({ budget, chatId })
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）

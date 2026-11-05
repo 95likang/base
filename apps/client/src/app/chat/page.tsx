@@ -14,6 +14,7 @@ import {
   useState,
 } from 'react'
 import { GenUIPart, isGenUIPart } from '@/genui/render'
+import { isRoadmapPart, RoadmapPart } from '@/roadmap/RoadmapPart'
 import { contextCommand } from './commands/context'
 import { dreamCommand, lintCommand, memoryCommand } from './commands/memory'
 import {
@@ -199,6 +200,12 @@ function ChatPageInner() {
         >
           + 新会话
         </button>
+        <Link
+          href="/plans"
+          className="rounded border px-3 py-2 text-center text-sm hover:bg-gray-100"
+        >
+          我的计划
+        </Link>
         {chats.map((chat) => (
           <div
             key={chat.id}
@@ -373,6 +380,15 @@ function ChatPanel({
                   return (
                     <div key={`genui:${part.toolCallId ?? i}`} className="my-2">
                       <GenUIPart part={part} />
+                    </div>
+                  )
+                }
+                if (isRoadmapPart(part)) {
+                  // AI SDK 的 tool part 联合由已知工具名生成，这里用 in 收窄取 id
+                  const toolCallId = 'toolCallId' in part ? part.toolCallId : undefined
+                  return (
+                    <div key={`roadmap:${toolCallId ?? i}`} className="my-2">
+                      <RoadmapPart part={part} />
                     </div>
                   )
                 }

@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./genui/spec": "./src/genui/spec.ts"
+    "./genui/spec": "./src/genui/spec.ts",
+    "./roadmap/spec": "./src/roadmap/spec.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

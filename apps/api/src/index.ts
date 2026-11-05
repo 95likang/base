@@ -16,6 +16,7 @@ import { cronRoute } from './routes/cron'
 import { memoryRoute } from './routes/memory'
 import { pluginsRoute } from './routes/plugins'
 import { ragRoute } from './routes/rag'
+import { roadmapsRoute } from './routes/roadmaps'
 import { securityRoute } from './routes/security'
 import { skillsRoute } from './routes/skills'
 import { usageRoute } from './routes/usage'
@@ -50,6 +51,7 @@ const routes = app
   .route('/api/memory', memoryRoute)
   .route('/api/plugins', pluginsRoute)
   .route('/api/rag', ragRoute)
+  .route('/api/roadmaps', roadmapsRoute)
   .route('/api/security', securityRoute)
   .route('/api/skills', skillsRoute)
   .route('/api/usage', usageRoute)

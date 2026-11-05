@@ -4,6 +4,7 @@ export * from './chat-schema'
 export * from './cron-schema'
 export * from './memory-schema'
 export * from './rag-schema'
+export * from './roadmap-schema'
 
 import type { user } from './auth-schema'
 
