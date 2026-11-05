@@ -25,8 +25,8 @@ function errorStream(error: unknown) {
   }
 }
 
-/** 用文本 part 构造一次成功的 doStream 结果 */
-function textStream(text: string) {
+/** 用文本 part 构造一次成功的 doStream 结果；length 用于模拟 max_tokens 截断 */
+function textStream(text: string, finishReason: 'stop' | 'length' = 'stop') {
   return {
     stream: new ReadableStream({
       start(controller) {
@@ -35,7 +35,10 @@ function textStream(text: string) {
         controller.enqueue({ type: 'text-end', id: 't' })
         controller.enqueue({
           type: 'finish',
-          finishReason: { unified: 'stop', raw: 'stop' },
+          finishReason: {
+            unified: finishReason,
+            raw: finishReason === 'length' ? 'max_tokens' : 'stop',
+          },
           usage: {
             inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
             outputTokens: { total: 1, text: 1, reasoning: undefined },
@@ -219,6 +222,21 @@ describe('agentLoop 重试编排', () => {
     expect(error).toBeInstanceOf(APICallError)
     expect((error as APICallError).statusCode).toBe(429)
     expect(model.doStreamCalls.length).toBe(4)
+  })
+
+  it('finishReason=length → 前端收到截断提示', async () => {
+    const model = new MockLanguageModelV3({
+      doStream: vi.fn(() => textStream('思考到一半', 'length')),
+    })
+    const writer = mockWriter()
+
+    await agentLoop(model, {}, makeMessages(), 'test system', writer)
+
+    expect(writer.chunks).toContainEqual({
+      type: 'text-delta',
+      id: 'output-truncated',
+      delta: '（输出达到长度上限，内容可能不完整。回复「继续」可接着写。）',
+    })
   })
 })
 

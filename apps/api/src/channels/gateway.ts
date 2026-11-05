@@ -1,5 +1,6 @@
 import type { LanguageModel, ModelMessage, UIMessageStreamWriter } from 'ai'
-import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
+import { AGENT_NOTICE_IDS, agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
+import { maxOutputTokens } from '../agent/model'
 import type { ToolRegistry } from '../tools/registry'
 import type { UsageTracker } from '../usage/tracker'
 import type { ChannelDefinition, IncomingMessage } from './types'
@@ -114,8 +115,10 @@ export class ChannelGateway {
     let reply = ''
     const writer: UIMessageStreamWriter = {
       write(chunk) {
-        if (chunk.type === 'text-start') reply = ''
-        else if (chunk.type === 'text-delta') reply += chunk.delta
+        // 提示块追加在正文之后，不能像模型正文那样重置，否则最终回复会被覆盖
+        if (chunk.type === 'text-start') {
+          if (!AGENT_NOTICE_IDS.has(chunk.id)) reply = ''
+        } else if (chunk.type === 'text-delta') reply += chunk.delta
       },
       merge() {},
       onError: undefined,
@@ -131,6 +134,9 @@ export class ChannelGateway {
       undefined,
       this.options.usageTracker,
       sessionKey,
+      undefined,
+      undefined,
+      maxOutputTokens,
     )
 
     const replyText = reply.trim()

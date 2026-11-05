@@ -17,6 +17,15 @@ const ModelConfigSchema = z.object({
   name: z.string().default(() => process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'),
   baseURL: z.string().default(() => process.env.ANTHROPIC_BASE_URL ?? ''),
   apiKey: z.string().default(() => process.env.ANTHROPIC_API_KEY ?? ''),
+  /**
+   * 单次模型调用的输出上限（思考 + 正文共享）。
+   * 不设置时 @ai-sdk/anthropic 会把未知模型压到 4096，长思考会吃光额度导致正文被截断。
+   */
+  maxOutputTokens: z
+    .number()
+    .int()
+    .min(1024)
+    .default(() => Number(process.env.ANTHROPIC_MAX_OUTPUT_TOKENS ?? 32_000)),
 })
 
 const PluginConfigSchema = z.object({

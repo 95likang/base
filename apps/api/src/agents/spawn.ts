@@ -2,7 +2,7 @@ import { startActiveObservation } from '@langfuse/tracing'
 import type { ModelMessage } from 'ai'
 import { streamText } from 'ai'
 import type { BudgetState } from '../agent/loop'
-import { defaultModel } from '../agent/model'
+import { defaultModel, maxOutputTokens } from '../agent/model'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
 import type { ToolRegistry } from '../tools/registry'
 import { createToolSearchTool } from '../tools/tool-search'
@@ -134,8 +134,11 @@ export async function spawnAgent(
       let step = 0
       let usedTokens = 0
       let stopReason: 'budget' | 'token-cap' | undefined
+      // 最后一步是否被 max_tokens 截断（每一步重置）
+      let truncatedOnLastStep = false
       while (step < MAX_STEPS) {
         step++
+        truncatedOnLastStep = false
         const isLastStep = step === MAX_STEPS
         console.log(`  ${tag} Step ${step}/${MAX_STEPS}${isLastStep ? ' (总结)' : ''}`)
         if (isLastStep) {
@@ -151,6 +154,7 @@ export async function spawnAgent(
           tools,
           toolChoice: isLastStep ? 'none' : 'auto',
           messages,
+          maxOutputTokens,
           // 子 Agent 不向前端转发内容，SDK 重试不会造成重复输出，交给 SDK 兜底 429/5xx
           maxRetries: 2,
           abortSignal: controller.signal,
@@ -172,6 +176,11 @@ export async function spawnAgent(
 
         const response = await result.response
         messages.push(...response.messages)
+
+        if ((await result.finishReason) === 'length') {
+          truncatedOnLastStep = true
+          console.log(`  ${tag} Step ${step} 输出达到 max_tokens 上限`)
+        }
 
         // 成本按 'sub-agent' 归类写入 usageLog，并同步计入父循环的预算
         const usage = await result.usage
@@ -201,9 +210,14 @@ export async function spawnAgent(
       // 被动中断时最后一条 assistant 消息往往只是「接下来我要做什么」的叙述，必须明确标记未完成，
       // 否则父 Agent 会把叙述当成结论
       const text = lastAssistantText(messages) || '(无输出)'
-      const result = stopReason
-        ? `[未完成：${stopReason === 'budget' ? '本次请求 token 预算已用尽' : '达到单次 token 上限'}] 最后进展：${text}`
-        : text
+      const incompleteReason = truncatedOnLastStep
+        ? '输出达到长度上限'
+        : stopReason === 'budget'
+          ? '本次请求 token 预算已用尽'
+          : stopReason === 'token-cap'
+            ? '达到单次 token 上限'
+            : null
+      const result = incompleteReason ? `[未完成：${incompleteReason}] 最后进展：${text}` : text
       ctx.agentRegistry.complete(runId, result)
       console.log(`  ${tag} 完成 ✓ (${step} 步, ${result.length} 字符)`)
       output = result

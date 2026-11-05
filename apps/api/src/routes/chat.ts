@@ -4,7 +4,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
-import { defaultModel } from '../agent/model'
+import { defaultModel, maxOutputTokens } from '../agent/model'
 import { microcompact, summarize } from '../context/compressor'
 import {
   applyDefense,
@@ -162,6 +162,7 @@ export const chatRoute = new Hono().post(
       model,
       compacted,
       c.req.raw.signal,
+      maxOutputTokens,
     )
     const defenseTouched =
       defense.truncated > 0 ||
@@ -225,6 +226,7 @@ export const chatRoute = new Hono().post(
                 chatId,
                 trace,
                 renderToolNames,
+                maxOutputTokens,
               ),
           )
           await trace?.finish(c.req.raw.signal.aborted ? 'cancelled' : 'completed')

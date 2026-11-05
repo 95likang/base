@@ -14,6 +14,15 @@ const MAX_RETRIES = 3
 /** 单次请求的 Token 预算上限（所有步骤累计） */
 export const TOKEN_BUDGET = 200_000
 
+/** 循环自身生成的提示块 id：渠道转发层据此区分模型正文，避免覆盖最终回复 */
+const NOTICE_ID = {
+  guard: 'loop-guard-tripped',
+  budget: 'token-budget-exhausted',
+  steps: 'step-limit',
+  truncated: 'output-truncated',
+} as const
+export const AGENT_NOTICE_IDS: ReadonlySet<string> = new Set(Object.values(NOTICE_ID))
+
 /**
  * Token 预算：由调用方持有（跨轮持续累计），agentLoop 每步成功后累加用量，
  * 超限时终止循环，防止长对话/工具链无节制烧 token。
@@ -51,6 +60,7 @@ export interface BudgetState {
  * @param chatId 可选会话 id：写入成本记录，供按会话查询用量（/api/usage?chatId=）
  * @param trace 可选本任务 Trace 记录器：每步记录输入上下文、输出、usage 与耗时
  * @param renderToolNames 可选纯渲染工具名集合：本步全部调用都是渲染型时直接结束循环
+ * @param maxOutputTokens 可选单次输出上限（思考 + 正文共享）：显式传入以覆盖 SDK 对未知模型的 4096 默认值
  */
 export async function agentLoop(
   model: LanguageModel,
@@ -65,6 +75,7 @@ export async function agentLoop(
   chatId?: string,
   trace?: LocalTraceRecorder,
   renderToolNames?: ReadonlySet<string>,
+  maxOutputTokens?: number,
 ): Promise<void> {
   // LanguageModel 联合类型含字符串形式（GlobalProviderModelId），两种都取得到 id
   const modelId = typeof model === 'string' ? model : model.modelId
@@ -78,6 +89,8 @@ export async function agentLoop(
   while (steps < MAX_STEPS) {
     steps++
 
+    // 本步输出是否被 max_tokens 截断（只对本步生效）
+    let truncatedByLength = false
     let hasToolCall = false
     let shouldBreak = false
     // 本步是否只调用了纯渲染工具（前端负责画，服务端无事可做）
@@ -120,6 +133,7 @@ export async function agentLoop(
           messages,
           tools,
           abortSignal,
+          maxOutputTokens,
           // 关掉 SDK 内置重试（默认 2 次、2s 起步）：由本循环统一做分类重试
           maxRetries: 0,
           // 不设 stopWhen：单次 streamText 默认只执行一步
@@ -222,6 +236,13 @@ export async function agentLoop(
         }
 
         stepMessages = (await result.response).messages
+        // 输出被 max_tokens 截断：思考吃满额度时正文会缺失，需要给前端明确提示
+        if ((await result.finishReason) === 'length') {
+          truncatedByLength = true
+          console.log(
+            `  [截断] Step ${steps} 输出达到 max_tokens 上限 (${maxOutputTokens ?? '默认'})`,
+          )
+        }
         // result.usage 为 SDK 拍平后的形状；provider 未上报时为 undefined
         const usage = await result.usage
         const normalized = normalizeUsage(usage)
@@ -277,6 +298,15 @@ export async function agentLoop(
     // 本步没有工具调用 → 模型直接给出文本回复，结束循环
     if (!hasToolCall) {
       finishedByReply = true
+      if (truncatedByLength) {
+        writer.write({ type: 'text-start', id: NOTICE_ID.truncated })
+        writer.write({
+          type: 'text-delta',
+          id: NOTICE_ID.truncated,
+          delta: '（输出达到长度上限，内容可能不完整。回复「继续」可接着写。）',
+        })
+        writer.write({ type: 'text-end', id: NOTICE_ID.truncated })
+      }
       break
     }
 
@@ -317,7 +347,7 @@ export async function agentLoop(
     // 上一次的摘要已作为 user 消息留在 messages 中，再次摘要会自然合并，无需外部状态
     const beforeCompaction = messages
     messages = microcompact(messages).messages
-    const stepCompacted = await summarize(model, messages, abortSignal)
+    const stepCompacted = await summarize(model, messages, abortSignal, maxOutputTokens)
     messages = stepCompacted.messages
     // 压缩改写了消息数组，tracker 按前后字符差对账
     tracker?.replaceMessages(beforeCompaction, messages)
@@ -334,10 +364,10 @@ export async function agentLoop(
   // 异常收尾时补提示，避免前端静默结束
   if (trippedByGuard || stoppedByBudget || !finishedByReply) {
     const id = trippedByGuard
-      ? 'loop-guard-tripped'
+      ? NOTICE_ID.guard
       : stoppedByBudget
-        ? 'token-budget-exhausted'
-        : 'step-limit'
+        ? NOTICE_ID.budget
+        : NOTICE_ID.steps
     const delta = trippedByGuard
       ? '（检测到无进展的重复操作，已强制终止。）'
       : stoppedByBudget

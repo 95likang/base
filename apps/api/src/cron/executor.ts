@@ -1,6 +1,6 @@
 import type { ModelMessage, UIMessageStreamWriter } from 'ai'
-import { agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
-import { defaultModel } from '../agent/model'
+import { AGENT_NOTICE_IDS, agentLoop, type BudgetState, TOKEN_BUDGET } from '../agent/loop'
+import { defaultModel, maxOutputTokens } from '../agent/model'
 import { pushDiscord } from '../channels/notify'
 import { config } from '../config/loader'
 import { buildRuntimeSystem } from '../context/runtime-prompt'
@@ -38,8 +38,10 @@ export async function startCron(): Promise<void> {
       let reply = ''
       const writer: UIMessageStreamWriter = {
         write(chunk) {
-          if (chunk.type === 'text-start') reply = ''
-          else if (chunk.type === 'text-delta') reply += chunk.delta
+          // 提示块追加在正文之后，不能像模型正文那样重置，否则最终回复会被覆盖
+          if (chunk.type === 'text-start') {
+            if (!AGENT_NOTICE_IDS.has(chunk.id)) reply = ''
+          } else if (chunk.type === 'text-delta') reply += chunk.delta
         },
         merge() {},
         onError: undefined,
@@ -56,6 +58,9 @@ export async function startCron(): Promise<void> {
           undefined,
           usageLog,
           'cron',
+          undefined,
+          undefined,
+          maxOutputTokens,
         )
       } catch (err) {
         if (controller.signal.aborted) throw new Error(`timeout: 执行超过 ${timeout}ms`)

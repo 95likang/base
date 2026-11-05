@@ -77,6 +77,7 @@ export async function runInit(): Promise<void> {
       name: modelName,
       baseURL: env('ANTHROPIC_BASE_URL'),
       apiKey: env('ANTHROPIC_API_KEY'),
+      maxOutputTokens: 32000,
     },
     tools: {
       guard: true,

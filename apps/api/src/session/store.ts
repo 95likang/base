@@ -78,13 +78,11 @@ export async function saveUserMessage(target: Chat, message: UIMessage): Promise
   })
 
   if (target.title === '新会话') {
+    // 纯图片消息没有 text part：也要落一个非默认标题，
+    // 否则「标题仍是新会话 = 空会话」的判定会把它误认成空会话
     const firstText = message.parts.find((p) => p.type === 'text')
-    if (firstText && 'text' in firstText) {
-      await db
-        .update(chat)
-        .set({ title: firstText.text.slice(0, 30) })
-        .where(eq(chat.id, target.id))
-    }
+    const title = firstText && 'text' in firstText ? firstText.text.slice(0, 30) : '图片对话'
+    await db.update(chat).set({ title }).where(eq(chat.id, target.id))
   }
 }
 

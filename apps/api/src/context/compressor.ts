@@ -121,6 +121,7 @@ export async function summarize(
   model: LanguageModel,
   messages: ModelMessage[],
   abortSignal?: AbortSignal,
+  maxOutputTokens?: number,
 ): Promise<CompactionResult> {
   const tokenEstimate = estimateTokens(messages)
   if (tokenEstimate < CONTEXT_TOKEN_THRESHOLD || messages.length <= KEEP_RECENT_MESSAGES) {
@@ -171,6 +172,7 @@ export async function summarize(
       system: COMPRESS_PROMPT,
       prompt: conversationText,
       abortSignal,
+      maxOutputTokens,
     })
 
     const summaryMessage: ModelMessage = {
