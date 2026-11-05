@@ -14,6 +14,7 @@ import {
 } from '../context/defense'
 import { createPromptBuilder, type PromptContext } from '../context/prompt-builder'
 import { validationHook } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { listActiveMemories } from '../memory/store'
 import { withTraceAttributes } from '../observability'
 import { ragStore } from '../rag/service'
@@ -57,21 +58,25 @@ const chatPostSchema = z.object({
  * POST   /            新建会话
  * DELETE /:id         删除会话（消息级联删除）
  * GET    /:id/messages 某会话的历史消息（UIMessage[]）
+ *
+ * 全部要求登录，且只能访问自己的会话。
  */
-export const chatsRoute = new Hono()
+export const chatsRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/', async (c) => {
-    return c.json({ chats: await listChats() })
+    return c.json({ chats: await listChats(c.get('authUser').id) })
   })
   .post('/', async (c) => {
-    return c.json({ chat: await createChat() }, 201)
+    return c.json({ chat: await createChat(c.get('authUser').id) }, 201)
   })
   .delete('/:id', async (c) => {
-    await deleteChat(c.req.param('id'))
+    await deleteChat(c.req.param('id'), c.get('authUser').id)
     return c.json({ ok: true })
   })
   .get('/:id/messages', async (c) => {
-    const target = await getChatOrThrow(c.req.param('id'))
-    return c.json({ chat: target, messages: await listMessages(target.id) })
+    const userId = c.get('authUser').id
+    const target = await getChatOrThrow(c.req.param('id'), userId)
+    return c.json({ chat: target, messages: await listMessages(target.id, userId) })
   })
 
 /**
@@ -95,18 +100,18 @@ function ensureTextPartForImageOnlyMessages(messages: ModelMessage[]): ModelMess
 }
 
 /**
- * Chat sub-router — LLM 流式对话（无需登录）。
+ * Chat sub-router — LLM 流式对话（要求登录）。
  * body: { chatId, messages: UIMessage[] }。用户最后一条消息先落库，
  * AI 回复在流结束后落库；首条消息自动生成会话标题。
  */
-export const chatRoute = new Hono().post(
-  '/',
-  zValidator('json', chatPostSchema, validationHook),
-  async (c) => {
+export const chatRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
+  .post('/', zValidator('json', chatPostSchema, validationHook), async (c) => {
+    const userId = c.get('authUser').id
     const { chatId, messages: rawMessages } = c.req.valid('json')
     const messages = rawMessages as UIMessage[]
 
-    const target = await getChatOrThrow(chatId)
+    const target = await getChatOrThrow(chatId, userId)
 
     // 本次新产生的最后一条用户消息（useChat 每次都发全量历史，只存增量）
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')
@@ -120,11 +125,11 @@ export const chatRoute = new Hono().post(
     // 请求级注册表：锁状态只协调本次请求内的并行工具调用，不跨请求共享。
     // 文件工具限制在 TOOL_WORKSPACE_DIR 指定的工作区内（默认 <cwd>/workspace），
     // 路径越界一律拒绝；TOOL_WORKSPACE_GUARD=false 可关闭该守卫（仅限本地开发）。
-    const registry = await createDefaultToolRegistry({ budget, chatId })
+    const registry = await createDefaultToolRegistry({ budget, chatId, userId })
     const tools = registry.toAISDKFormat()
     // 请求级加载未过期记忆：注入 system prompt 索引。
     // 本次对话中保存的记忆要到下一轮请求才注入（与 Claude Code 文件记忆一致）
-    const memories = await listActiveMemories()
+    const memories = await listActiveMemories(userId)
     // 知识库状态同样请求级读取：索引懒加载后取规模与来源，空库时不注入该段
     await ragStore.ensureLoaded()
     const renderToolNames = registry.getRenderToolNames()
@@ -250,5 +255,4 @@ export const chatRoute = new Hono().post(
     })
 
     return createUIMessageStreamResponse({ stream: uiStream })
-  },
-)
+  })

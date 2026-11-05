@@ -69,6 +69,7 @@ describe('完成一次训练', () => {
 
     const content = await completeSession({
       roadmapId: 'roadmap-1',
+      userId: 'user-1',
       phaseIndex: 0,
       sessionIndex: 0,
       note: '把三个输入都提到父组件了',
@@ -86,7 +87,13 @@ describe('完成一次训练', () => {
     getRoadmap.mockResolvedValue(makeRow(makeSession({ status: 'done' })))
 
     await expect(
-      completeSession({ roadmapId: 'roadmap-1', phaseIndex: 0, sessionIndex: 0, note: '再交一次' }),
+      completeSession({
+        roadmapId: 'roadmap-1',
+        userId: 'user-1',
+        phaseIndex: 0,
+        sessionIndex: 0,
+        note: '再交一次',
+      }),
     ).rejects.toThrow('Session already completed.')
     expect(updateRoadmapContent).not.toHaveBeenCalled()
   })
@@ -94,12 +101,24 @@ describe('完成一次训练', () => {
   it('计划或训练不存在时返回对应错误', async () => {
     getRoadmap.mockResolvedValue(null)
     await expect(
-      completeSession({ roadmapId: 'x', phaseIndex: 0, sessionIndex: 0, note: 'note' }),
+      completeSession({
+        roadmapId: 'x',
+        userId: 'user-1',
+        phaseIndex: 0,
+        sessionIndex: 0,
+        note: 'note',
+      }),
     ).rejects.toThrow('Roadmap not found.')
 
     getRoadmap.mockResolvedValue(makeRow())
     await expect(
-      completeSession({ roadmapId: 'roadmap-1', phaseIndex: 9, sessionIndex: 0, note: 'note' }),
+      completeSession({
+        roadmapId: 'roadmap-1',
+        userId: 'user-1',
+        phaseIndex: 9,
+        sessionIndex: 0,
+        note: 'note',
+      }),
     ).rejects.toThrow('Session not found.')
     expect(updateRoadmapContent).not.toHaveBeenCalled()
   })
@@ -109,7 +128,13 @@ describe('完成一次训练', () => {
     generateText.mockRejectedValue(new Error('upstream down'))
 
     await expect(
-      completeSession({ roadmapId: 'roadmap-1', phaseIndex: 0, sessionIndex: 0, note: 'note' }),
+      completeSession({
+        roadmapId: 'roadmap-1',
+        userId: 'user-1',
+        phaseIndex: 0,
+        sessionIndex: 0,
+        note: 'note',
+      }),
     ).rejects.toThrow('Failed to generate feedback.')
     expect(updateRoadmapContent).not.toHaveBeenCalled()
   })

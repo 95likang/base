@@ -16,7 +16,7 @@ import type { ToolDefinition } from './registry'
  * 注意这与 genui 的纯渲染工具不同——execute 有副作用，失败必须 throw，
  * 由 loop 转发 tool-output-error 并继续一轮让模型处理。
  */
-export function createRoadmapTool(options: { chatId: string }): ToolDefinition {
+export function createRoadmapTool(options: { chatId: string; userId: string }): ToolDefinition {
   return {
     name: PRACTICE_ROADMAP_TOOL_NAME,
     description: [
@@ -58,7 +58,7 @@ export function createRoadmapTool(options: { chatId: string }): ToolDefinition {
       if (!areSessionTimesValid(content.phases)) {
         throw new Error('路线图内容不合法：训练结束时间必须晚于开始时间')
       }
-      const row = await createRoadmap({ chatId: options.chatId, content })
+      const row = await createRoadmap({ userId: options.userId, chatId: options.chatId, content })
       return { roadmapId: row.id }
     },
   }

@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { ApiError, validationHook } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { skillLoader } from '../skills'
 import { isValidSkillName, parseSkillFile, type SkillDefinition } from '../skills/loader'
 
@@ -30,7 +31,8 @@ function toSummary(skill: SkillDefinition) {
  * PATCH  /:name       启用/停用（{ enabled }）
  * DELETE /:name       删除 skill 目录
  */
-export const skillsRoute = new Hono()
+export const skillsRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/', (c) => {
     return c.json({ skills: skillLoader.listAll().map(toSummary) })
   })

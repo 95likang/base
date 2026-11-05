@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { ApiError } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { pluginManager } from '../plugins'
 
 /**
@@ -10,7 +11,8 @@ import { pluginManager } from '../plugins'
  *
  * 加载状态只存在于当前进程：重启后回到启动时的自动加载状态。
  */
-export const pluginsRoute = new Hono()
+export const pluginsRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/', (c) => {
     return c.json({ plugins: pluginManager.list() })
   })

@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { type Chat, chat, chatMessage, toUIMessage } from '../db/chat-schema'
 import { ApiError } from '../lib/api-error'
@@ -9,29 +9,41 @@ import { ApiError } from '../lib/api-error'
  * 路由层（routes/chat.ts）只做 HTTP 编排，全部读写经由此模块。
  */
 
-/** 会话列表（最近更新在前，最多 50 条） */
-export async function listChats(): Promise<Chat[]> {
-  return db.select().from(chat).orderBy(desc(chat.updatedAt)).limit(50)
+/** 会话列表（当前用户，最近更新在前，最多 50 条） */
+export async function listChats(userId: string): Promise<Chat[]> {
+  return db
+    .select()
+    .from(chat)
+    .where(eq(chat.userId, userId))
+    .orderBy(desc(chat.updatedAt))
+    .limit(50)
 }
 
 /** 新建空会话 */
-export async function createChat(): Promise<Chat> {
+export async function createChat(userId: string): Promise<Chat> {
   // insert 单行 returning 必有且仅有一行
-  const [created] = (await db.insert(chat).values({}).returning()) as [Chat]
+  const [created] = (await db.insert(chat).values({ userId }).returning()) as [Chat]
   return created
 }
 
-/** 删除会话（消息级联删除）；不存在时抛 404 */
-export async function deleteChat(id: string): Promise<void> {
-  const [deleted] = await db.delete(chat).where(eq(chat.id, id)).returning({ id: chat.id })
+/** 删除会话（消息级联删除）；不属于当前用户或不存在时抛 404 */
+export async function deleteChat(id: string, userId: string): Promise<void> {
+  const [deleted] = await db
+    .delete(chat)
+    .where(and(eq(chat.id, id), eq(chat.userId, userId)))
+    .returning({ id: chat.id })
   if (!deleted) {
     throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
   }
 }
 
-/** 按 id 取会话；不存在时抛 404 */
-export async function getChatOrThrow(id: string): Promise<Chat> {
-  const [target] = await db.select().from(chat).where(eq(chat.id, id)).limit(1)
+/** 按 id 取当前用户的会话；不存在或不属于该用户时抛 404 */
+export async function getChatOrThrow(id: string, userId: string): Promise<Chat> {
+  const [target] = await db
+    .select()
+    .from(chat)
+    .where(and(eq(chat.id, id), eq(chat.userId, userId)))
+    .limit(1)
   if (!target) {
     throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
   }
@@ -39,8 +51,8 @@ export async function getChatOrThrow(id: string): Promise<Chat> {
 }
 
 /** 某会话的历史消息（按时间升序，已转为 UIMessage[]） */
-export async function listMessages(id: string): Promise<UIMessage[]> {
-  await getChatOrThrow(id)
+export async function listMessages(id: string, userId: string): Promise<UIMessage[]> {
+  await getChatOrThrow(id, userId)
   const rows = await db
     .select()
     .from(chatMessage)

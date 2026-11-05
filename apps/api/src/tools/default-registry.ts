@@ -40,6 +40,8 @@ export async function createDefaultToolRegistry(options?: {
   budget?: BudgetState
   /** 当前会话 id：路线图需要归属到会话，cron/channel 无会话时不注册该工具 */
   chatId?: string
+  /** 当前登录用户：记忆与路线图按用户隔离；cron/channel 无登录用户时为 null */
+  userId?: string | null
 }): Promise<ToolRegistry> {
   const registry = new ToolRegistry()
   registry.register(
@@ -61,7 +63,7 @@ export async function createDefaultToolRegistry(options?: {
   // 延迟工具的发现入口：激活后 registry 原地更新 ToolSet，后续步骤立即可用
   registry.register(createToolSearchTool(registry))
   // 记忆工具：LLM 在对话中自主触发保存/读取（写库，独占锁）
-  registry.register(createMemoryTool())
+  registry.register(createMemoryTool({ userId: options?.userId ?? null }))
   // 知识库工具：导入工作区文档 + 混合检索（与管理页共用同一 store）
   registry.register(...createRagTools(ragStore, ragEmbedder))
   // Skill 工具：系统提示只给索引，模型按需 load 完整指令
@@ -71,14 +73,16 @@ export async function createDefaultToolRegistry(options?: {
   // 主动推送：把消息发到固定的 Discord 通知频道
   registry.register(notifyDiscordTool)
   // 子 Agent：独立上下文执行 + 结果压缩回传，运行记录进进程级注册表
-  registry.register(createSpawnTool(subAgentRegistry, registry, options?.budget))
+  registry.register(
+    createSpawnTool(subAgentRegistry, registry, options?.budget, options?.userId ?? null),
+  )
   // 插件工具：进程级已加载插件注入请求级 registry（加载/卸载影响后续请求）
   registry.register(...pluginManager.getTools())
   // 生成式 UI：纯渲染型工具，模型只填参数，组件由前端注册表渲染
   registry.register(...createGenUITools())
   // 训练路线图：写库 + 前端卡片。只在有会话时注册，避免产生无法展示的孤儿行
-  if (options?.chatId) {
-    registry.register(createRoadmapTool({ chatId: options.chatId }))
+  if (options?.chatId && options.userId) {
+    registry.register(createRoadmapTool({ chatId: options.chatId, userId: options.userId }))
   }
   // 安全层：继承进程级角色，挂上共享的 hook 管线
   registry.setRole(getRole())

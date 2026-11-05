@@ -20,6 +20,8 @@ export interface SpawnContext {
   signal?: AbortSignal
   /** 父循环的 token 预算：子 Agent 消耗直接累加进去，受同一个上限约束 */
   budget?: BudgetState
+  /** 父请求的登录用户：子 Agent 的系统提示要注入同一用户的记忆 */
+  userId?: string | null
 }
 
 /** 子 Agent 的单次执行步数上限（最后一步强制输出文字总结） */
@@ -126,7 +128,7 @@ export async function spawnAgent(
       subRegistry.register(createToolSearchTool(subRegistry))
       const tools = subRegistry.toAISDKFormat()
       const system =
-        (await buildRuntimeSystem(subRegistry, 'sub-agent', messages.length)) +
+        (await buildRuntimeSystem(subRegistry, 'sub-agent', messages.length, ctx.userId ?? null)) +
         SUB_AGENT_SYSTEM_SUFFIX
       const model = defaultModel
       const modelId = model.modelId

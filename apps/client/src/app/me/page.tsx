@@ -3,6 +3,7 @@
 import { parseRoadmapContent } from 'api/roadmap/spec'
 import { CheckCircle2, ClipboardList, LogIn, LogOut } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +14,7 @@ type PracticeStats = { plans: number; done: number; total: number }
 
 /** 「我的」：训练统计 + 账号信息与登录/退出入口。 */
 export default function MePage() {
+  const router = useRouter()
   const { data: session, isPending } = authClient.useSession()
   const [stats, setStats] = useState<PracticeStats | null>(null)
   const [statsFailed, setStatsFailed] = useState(false)
@@ -49,6 +51,9 @@ export default function MePage() {
 
   const signOut = async () => {
     await authClient.signOut()
+    // 退出后 cookie 已失效，直接回登录页，避免停留在 401 的错误态
+    router.replace('/login')
+    router.refresh()
   }
 
   return (

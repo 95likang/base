@@ -9,6 +9,7 @@ const { agentLoopMock } = vi.hoisted(() => ({ agentLoopMock: vi.fn() }))
 vi.mock('../agent/loop', () => ({
   agentLoop: agentLoopMock,
   TOKEN_BUDGET: 200_000,
+  AGENT_NOTICE_IDS: new Set<string>(),
 }))
 
 // mock 必须声明在 import 之前（vi.hoisted 保证提升后仍可访问）

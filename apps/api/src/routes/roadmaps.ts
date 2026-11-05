@@ -2,6 +2,7 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { ApiError, validationHook } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { completeSession, uncompleteSession } from '../roadmap/service'
 import { deleteRoadmap, getRoadmap, listRoadmaps } from '../roadmap/store'
 
@@ -25,21 +26,22 @@ const completeBodySchema = z.object({
  * POST /:id/sessions/:phaseIndex/:sessionIndex/uncomplete
  *                                                 撤销完成记录（误点兜底）
  *
- * 无认证：与 /api/chats、/api/memory 一致。
+ * 全部要求登录，且只能访问自己的计划。
  */
-export const roadmapsRoute = new Hono()
+export const roadmapsRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/', async (c) => {
-    return c.json({ roadmaps: await listRoadmaps() })
+    return c.json({ roadmaps: await listRoadmaps(c.get('authUser').id) })
   })
   .get('/:id', async (c) => {
-    const roadmap = await getRoadmap(c.req.param('id'))
+    const roadmap = await getRoadmap(c.req.param('id'), c.get('authUser').id)
     if (!roadmap) {
       throw new ApiError('ROADMAP_NOT_FOUND', 'Roadmap not found.', 404)
     }
     return c.json({ roadmap })
   })
   .delete('/:id', async (c) => {
-    if (!(await deleteRoadmap(c.req.param('id')))) {
+    if (!(await deleteRoadmap(c.req.param('id'), c.get('authUser').id))) {
       throw new ApiError('ROADMAP_NOT_FOUND', 'Roadmap not found.', 404)
     }
     return c.json({ ok: true })
@@ -53,6 +55,7 @@ export const roadmapsRoute = new Hono()
       const { note } = c.req.valid('json')
       const content = await completeSession({
         roadmapId: id,
+        userId: c.get('authUser').id,
         phaseIndex,
         sessionIndex,
         note,
@@ -66,7 +69,12 @@ export const roadmapsRoute = new Hono()
     zValidator('param', sessionParamSchema, validationHook),
     async (c) => {
       const { id, phaseIndex, sessionIndex } = c.req.valid('param')
-      const content = await uncompleteSession({ roadmapId: id, phaseIndex, sessionIndex })
+      const content = await uncompleteSession({
+        roadmapId: id,
+        userId: c.get('authUser').id,
+        phaseIndex,
+        sessionIndex,
+      })
       return c.json({ content })
     },
   )

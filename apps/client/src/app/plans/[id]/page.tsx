@@ -1,9 +1,9 @@
 import { parseRoadmapContent } from 'api/roadmap/spec'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { createServerClient } from '@/lib/api'
+import { createAuthedServerClient } from '@/lib/api'
 import { relativeDay } from '@/lib/date'
 import { RoadmapCard } from '@/roadmap/RoadmapPart'
 import { DeletePlanButton } from '../DeletePlanButton'
@@ -21,9 +21,10 @@ export default async function PlanDetailPage({
   const { id } = await params
   const { phase } = await searchParams
   const focusPhaseIndex = Number.parseInt(phase ?? '', 10)
-  const client = createServerClient()
+  const client = await createAuthedServerClient()
   const res = await client.api.roadmaps[':id'].$get({ param: { id } })
 
+  if (res.status === 401) redirect(`/login?redirect=${encodeURIComponent(`/plans/${id}`)}`)
   if (res.status === 404) notFound()
   if (!res.ok) {
     return (

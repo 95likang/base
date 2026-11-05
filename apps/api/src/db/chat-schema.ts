@@ -1,21 +1,30 @@
 import type { UIMessage } from 'ai'
 import { relations } from 'drizzle-orm'
 import { index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { user } from './auth-schema'
 
 /**
  * 聊天会话。title 由第一条用户消息自动生成（demo 简化，不额外调 LLM）。
+ * 会话归属登录用户，所有读写都按 userId 过滤。
  */
-export const chat = pgTable('chat', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  title: text('title').notNull().default('新会话'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at')
-    .defaultNow()
-    .$onUpdate(() => /* @__PURE__ */ new Date())
-    .notNull(),
-})
+export const chat = pgTable(
+  'chat',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default('新会话'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [index('chat_userId_idx').on(table.userId)],
+)
 
 /**
  * 聊天消息。直接存 UIMessage 的 JSON 形状（role + parts），

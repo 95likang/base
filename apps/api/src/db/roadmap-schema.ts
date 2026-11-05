@@ -1,5 +1,6 @@
-import { jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import type { RoadmapContent } from '../roadmap/spec'
+import { user } from './auth-schema'
 import { chat } from './chat-schema'
 
 /**
@@ -9,18 +10,25 @@ import { chat } from './chat-schema'
  * chatId 唯一：一个会话只保留最终版（重复生成走 upsert 覆盖）。
  * 唯一约束自带索引，删除会话时级联删除也走它。
  */
-export const practiceRoadmap = pgTable('practice_roadmap', {
-  id: text('id')
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  chatId: text('chat_id')
-    .notNull()
-    .unique()
-    .references(() => chat.id, { onDelete: 'cascade' }),
-  content: jsonb('content').$type<RoadmapContent>().notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  /** 最终版时间：upsert 时显式写成数据库 now()，不用 $onUpdate 以免 JS Date 与本地时间混用 */
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-})
+export const practiceRoadmap = pgTable(
+  'practice_roadmap',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    chatId: text('chat_id')
+      .notNull()
+      .unique()
+      .references(() => chat.id, { onDelete: 'cascade' }),
+    content: jsonb('content').$type<RoadmapContent>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    /** 最终版时间：upsert 时显式写成数据库 now()，不用 $onUpdate 以免 JS Date 与本地时间混用 */
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [index('practice_roadmap_userId_idx').on(table.userId)],
+)
 
 export type PracticeRoadmapRow = typeof practiceRoadmap.$inferSelect

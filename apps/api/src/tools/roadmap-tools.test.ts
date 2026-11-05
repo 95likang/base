@@ -47,7 +47,7 @@ describe('practice_roadmap 工具', () => {
   })
 
   it('合法输入写入后只返回 roadmapId', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const result = await tool.execute(validInput(), {})
 
     expect(result).toEqual({ roadmapId: 'roadmap-1' })
@@ -55,12 +55,13 @@ describe('practice_roadmap 工具', () => {
 
     const [call] = createRoadmap.mock.calls
     expect(call[0].chatId).toBe('chat-1')
+    expect(call[0].userId).toBe('user-1')
     // 落库的是 zod 重建后的对象，不是模型原始输入
     expect(call[0].content.phases).toHaveLength(1)
   })
 
   it('currentPhaseIndex 越界时抛错，且不写库', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const input = { ...validInput(), currentPhaseIndex: 5 }
 
     await expect(tool.execute(input, {})).rejects.toThrow('路线图内容不合法')
@@ -68,7 +69,7 @@ describe('practice_roadmap 工具', () => {
   })
 
   it('字段越界时抛错，且不写库', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const input = validInput()
     input.phases[0].sessions[0].minutes = 500
 
@@ -77,7 +78,7 @@ describe('practice_roadmap 工具', () => {
   })
 
   it('缺少计划元信息时抛错，且不写库', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const input: Record<string, unknown> = { ...validInput() }
     delete input.summary
 
@@ -86,7 +87,7 @@ describe('practice_roadmap 工具', () => {
   })
 
   it('endDate 早于 startDate 时抛错，且不写库', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const input = { ...validInput(), startDate: '2026-11-05', endDate: '2026-11-01' }
 
     await expect(tool.execute(input, {})).rejects.toThrow('endDate 早于 startDate')
@@ -94,7 +95,7 @@ describe('practice_roadmap 工具', () => {
   })
 
   it('训练结束时间早于开始时间时抛错，且不写库', async () => {
-    const tool = createRoadmapTool({ chatId: 'chat-1' })
+    const tool = createRoadmapTool({ chatId: 'chat-1', userId: 'user-1' })
     const input = validInput()
     input.phases[0].sessions[0].startTime = '21:00'
     input.phases[0].sessions[0].endTime = '20:00'

@@ -37,12 +37,13 @@ function loadSession(
  */
 export async function completeSession(input: {
   roadmapId: string
+  userId: string
   phaseIndex: number
   sessionIndex: number
   note: string
   signal?: AbortSignal
 }): Promise<RoadmapContent> {
-  const row = await getRoadmap(input.roadmapId)
+  const row = await getRoadmap(input.roadmapId, input.userId)
   const { content, session } = loadSession(row, input.phaseIndex, input.sessionIndex)
   if (session.status === 'done') {
     throw new ApiError('SESSION_ALREADY_DONE', 'Session already completed.', 409)
@@ -87,10 +88,11 @@ export async function completeSession(input: {
  */
 export async function uncompleteSession(input: {
   roadmapId: string
+  userId: string
   phaseIndex: number
   sessionIndex: number
 }): Promise<RoadmapContent> {
-  const row = await getRoadmap(input.roadmapId)
+  const row = await getRoadmap(input.roadmapId, input.userId)
   const { content, session } = loadSession(row, input.phaseIndex, input.sessionIndex)
   if (session.status !== 'done') {
     throw new ApiError('SESSION_NOT_DONE', 'Session is not completed.', 409)

@@ -1,5 +1,6 @@
 import { parseRoadmapContent } from 'api/roadmap/spec'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -9,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { createServerClient } from '@/lib/api'
+import { createAuthedServerClient } from '@/lib/api'
 import { relativeDay } from '@/lib/date'
 import { DeletePlanButton } from './DeletePlanButton'
 
@@ -22,8 +23,11 @@ export const dynamic = 'force-dynamic'
  * 每张卡回答三件事：这是哪个阶段、下一次练什么、整体完成了多少。
  */
 export default async function PlansPage() {
-  const client = createServerClient()
+  const client = await createAuthedServerClient()
   const res = await client.api.roadmaps.$get()
+
+  // cookie 失效时 middleware 拦不住（只查存在性），这里收到 401 直接去登录页
+  if (res.status === 401) redirect('/login?redirect=/plans')
 
   if (!res.ok) {
     return (

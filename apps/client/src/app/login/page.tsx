@@ -1,18 +1,27 @@
 'use client'
 
 import { Eye, EyeOff } from 'lucide-react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authClient } from '@/lib/auth-client'
 
-/** 登录/注册页：走同源 rewrite 代理，成功后回到「我的」页。 */
+/**
+ * 登录后的目标页：只接受站内路径，避免 redirect 参数被用作开放重定向。
+ * 仅在浏览器端调用（useEffect / 事件回调）。
+ */
+function resolveRedirect(): string {
+  const redirect = new URLSearchParams(window.location.search).get('redirect')
+  return redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : '/plans'
+}
+
+/** 登录/注册页：走同源 rewrite 代理，成功后回到被拦截前想访问的页面。 */
 export default function LoginPage() {
   const router = useRouter()
+  const { data: session, isPending } = authClient.useSession()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -20,6 +29,14 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
+
+  // 已有有效 session 时不停留在登录页（middleware 只查 cookie 存在性，
+  // 页面这里用真实 session 兜底，同时也让失效 cookie 的用户能正常重新登录）
+  useEffect(() => {
+    if (!isPending && session) {
+      router.replace(resolveRedirect())
+    }
+  }, [isPending, session, router])
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -34,7 +51,7 @@ export default function LoginPage() {
         setError(res.error.message ?? '认证失败，请重试。')
         return
       }
-      router.push('/me')
+      router.push(resolveRedirect())
       router.refresh()
     } finally {
       setPending(false)
@@ -130,15 +147,6 @@ export default function LoginPage() {
         >
           {mode === 'signup' ? '去登录' : '去注册'}
         </button>
-      </p>
-
-      <p className="text-center">
-        <Link
-          href="/plans"
-          className="text-sm font-bold text-muted-foreground underline-offset-4 hover:underline"
-        >
-          先逛逛，稍后登录
-        </Link>
       </p>
     </main>
   )

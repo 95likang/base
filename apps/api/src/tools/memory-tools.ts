@@ -14,7 +14,7 @@ import type { ToolDefinition } from './registry'
  * 触发规则（四类型的"什么时候该存"）全部写进 description——
  * LLM 区分记忆类型完全靠这里引导。
  */
-export function createMemoryTool(): ToolDefinition {
+export function createMemoryTool(options: { userId: string | null }): ToolDefinition {
   const today = new Date().toISOString().slice(0, 10)
 
   return {
@@ -88,6 +88,7 @@ export function createMemoryTool(): ToolDefinition {
             }
           }
           const saved = await saveMemory({
+            userId: options.userId,
             type: args.type as MemoryType,
             name: args.name,
             description: args.description || args.name,
@@ -97,7 +98,7 @@ export function createMemoryTool(): ToolDefinition {
           return `已保存记忆: [${saved.id}] ${saved.name}`
         }
         case 'list': {
-          const entries = await listActiveMemories()
+          const entries = await listActiveMemories(options.userId)
           if (entries.length === 0) return '当前没有存储任何记忆。'
           return `记忆列表（共 ${entries.length} 条）：\n${entries
             .map((e) => `  [${e.id}] (${e.type}) ${e.name} — ${e.description}`)
@@ -105,7 +106,7 @@ export function createMemoryTool(): ToolDefinition {
         }
         case 'search': {
           if (!args.query) return '搜索失败：需要 query 参数'
-          const results = await searchMemories(args.query)
+          const results = await searchMemories(args.query, options.userId)
           if (results.length === 0) return `没有找到与 "${args.query}" 相关的记忆。`
           return `搜索结果（${results.length} 条匹配）：\n${results
             .map((e) => `  [${e.id}] (${e.type}) ${e.name} — ${e.description}`)
@@ -113,16 +114,18 @@ export function createMemoryTool(): ToolDefinition {
         }
         case 'read': {
           if (!args.id) return '读取失败：需要 id 参数'
-          const entry = await getMemory(args.id)
+          const entry = await getMemory(args.id, options.userId)
           if (!entry) return `记忆不存在或已过期: ${args.id}`
           return `[${entry.id}] (${entry.type}) ${entry.name}\n${entry.content}`
         }
         case 'delete': {
           if (!args.id) return '删除失败：需要 id 参数'
-          return (await deleteMemory(args.id)) ? `已删除记忆: ${args.id}` : `记忆不存在: ${args.id}`
+          return (await deleteMemory(args.id, options.userId))
+            ? `已删除记忆: ${args.id}`
+            : `记忆不存在: ${args.id}`
         }
         case 'lint': {
-          const { total, reports } = await lintMemories()
+          const { total, reports } = await lintMemories(options.userId)
           if (reports.length === 0) return `记忆体检：共 ${total} 条，未发现问题。`
           const details = reports.map(
             (r) =>

@@ -4,6 +4,7 @@ import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { ApiError, validationHook } from '../lib/api-error'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { ingestFile } from '../rag/ingest'
 import { InvalidDocumentError } from '../rag/loader'
 import { hybridSearch } from '../rag/search'
@@ -45,7 +46,8 @@ function ingestionError(err: unknown): ApiError {
  * DELETE /documents?source= 删除某文档
  * DELETE /                 清空知识库
  */
-export const ragRoute = new Hono()
+export const ragRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/documents', async (c) => {
     // 统计口径与列表同源（DB 全量），避免切换 embedding 模型后数字与表格对不上
     const documents = await listDocuments()

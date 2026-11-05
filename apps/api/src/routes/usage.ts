@@ -13,6 +13,7 @@ import {
   toolGuide,
 } from '../context/prompt-builder'
 import { buildContextSnapshot } from '../context/view'
+import { type AuthEnv, requireAuth } from '../lib/auth-guard'
 import { buildMemoryPromptSection, listActiveMemories } from '../memory/store'
 import { ragStore } from '../rag/service'
 import { getRole } from '../security'
@@ -40,20 +41,23 @@ import { usageLog } from '../usage'
  * GET /          用量查询：不带参数为进程累计；?chatId= 只统计该会话
  * GET /context   某会话的上下文占用快照（?chatId= 缺省为空会话）
  */
-export const usageRoute = new Hono()
+export const usageRoute = new Hono<AuthEnv>()
+  .use('*', requireAuth)
   .get('/', (c) => {
     const chatId = c.req.query('chatId')
     return c.json({ totals: usageLog.totals(chatId), recent: usageLog.recent(20, chatId) })
   })
   .get('/context', async (c) => {
     const chatId = c.req.query('chatId')
+    const userId = c.get('authUser').id
 
     // 与 chat.ts 相同的入口管线（估算口径一致）：时间戳 → 三层防线 → microcompact。
     // 跳过 summarize（LLM 调用，仅高占用时触发）；MCP 工具是延迟加载不占 prompt，
     // 这里只注册内置工具即可。
     let modelMessages: ModelMessage[] = []
     if (chatId) {
-      const uiMessages = await listMessages(chatId)
+      // 校验会话归属：不属于当前用户时按 404 处理，不泄漏他人会话内容
+      const uiMessages = await listMessages(chatId, userId)
       const createdAtById = await getMessageCreatedAt(chatId)
       const built = await buildTimestampedMessages(uiMessages, createdAtById)
       const defense = applyDefense(built.messages, built.timestamps)
@@ -77,7 +81,7 @@ export const usageRoute = new Hono()
       webFetchTool,
       startPreviewTool,
     )
-    const memories = await listActiveMemories()
+    const memories = await listActiveMemories(userId)
     await ragStore.ensureLoaded()
     const promptCtx = {
       toolCount: registry.getActiveTools().length,

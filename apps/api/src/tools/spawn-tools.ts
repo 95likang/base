@@ -14,6 +14,7 @@ export function createSpawnTool(
   agentRegistry: SubAgentRegistry,
   registry: ToolRegistry,
   budget?: BudgetState,
+  userId: string | null = null,
 ): ToolDefinition {
   return {
     name: 'spawn_agent',
@@ -47,6 +48,7 @@ export function createSpawnTool(
         currentDepth: 0,
         signal: options.abortSignal,
         budget,
+        userId,
       }
 
       if (input.tasks && input.tasks.length > 0) {

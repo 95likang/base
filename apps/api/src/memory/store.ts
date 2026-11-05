@@ -68,29 +68,39 @@ function toEntry(row: MemoryRow): MemoryEntry {
 /** 未过期条件：expiresAt 为空（永久）或晚于当前时间 */
 const notExpired = or(isNull(memory.expiresAt), gt(memory.expiresAt, sql`now()`))
 
-/** 全部有效记忆（未过期），updatedAt 倒序，注入 prompt 用 */
-export async function listActiveMemories(): Promise<MemoryEntry[]> {
+/** 记忆归属条件：登录用户按 userId 过滤，Channel/Cron 等无登录入口用系统级（NULL） */
+function ownedBy(userId: string | null) {
+  return userId ? eq(memory.userId, userId) : isNull(memory.userId)
+}
+
+/** 当前用户全部有效记忆（未过期），updatedAt 倒序，注入 prompt 用 */
+export async function listActiveMemories(userId: string | null): Promise<MemoryEntry[]> {
   const rows = await db
     .select()
     .from(memory)
-    .where(notExpired)
+    .where(and(notExpired, ownedBy(userId)))
     .orderBy(desc(memory.updatedAt))
     .limit(MAX_PROMPT_ENTRIES)
   return rows.map(toEntry)
 }
 
-/** 管理视图：全部记忆（含已过期），UPDATED 倒序；上限防无界响应（注入侧另有 200 条上限） */
-export async function listAllMemories(): Promise<MemoryEntry[]> {
-  const rows = await db.select().from(memory).orderBy(desc(memory.updatedAt)).limit(1000)
+/** 管理视图：当前用户全部记忆（含已过期），UPDATED 倒序；上限防无界响应（注入侧另有 200 条上限） */
+export async function listAllMemories(userId: string | null): Promise<MemoryEntry[]> {
+  const rows = await db
+    .select()
+    .from(memory)
+    .where(ownedBy(userId))
+    .orderBy(desc(memory.updatedAt))
+    .limit(1000)
   return rows.map(toEntry)
 }
 
-/** 按 id 读取单条（未过期才返回），并刷新 lastReadAt 供 lint 的 TTL 判断 */
-export async function getMemory(id: string): Promise<MemoryEntry | null> {
+/** 按 id 读取单条（未过期且属于当前用户才返回），并刷新 lastReadAt 供 lint 的 TTL 判断 */
+export async function getMemory(id: string, userId: string | null): Promise<MemoryEntry | null> {
   const [row] = await db
     .select()
     .from(memory)
-    .where(and(eq(memory.id, id), notExpired))
+    .where(and(eq(memory.id, id), ownedBy(userId), notExpired))
     .limit(1)
   if (!row) return null
   // 用原生 SQL 只改 last_read_at：走 .set() 会触发 updatedAt 的 $onUpdate，污染排序与 TTL 兜底
@@ -100,17 +110,17 @@ export async function getMemory(id: string): Promise<MemoryEntry | null> {
   return toEntry(row)
 }
 
-/** 全库体检：路由与工具共用的统一入口（数据加载 + 校验） */
-export async function lintMemories(): Promise<{
+/** 当前用户的记忆体检：路由与工具共用的统一入口（数据加载 + 校验） */
+export async function lintMemories(userId: string | null): Promise<{
   total: number
   reports: ValidationReport[]
 }> {
-  const entries = await listAllMemories()
+  const entries = await listAllMemories(userId)
   return { total: entries.length, reports: lintAll(entries, LINT_BASE_DIRS) }
 }
 
-/** 关键词搜索（name/description/content 子串匹配，大小写不敏感，未过期） */
-export async function searchMemories(query: string): Promise<MemoryEntry[]> {
+/** 关键词搜索（当前用户，name/description/content 子串匹配，大小写不敏感，未过期） */
+export async function searchMemories(query: string, userId: string | null): Promise<MemoryEntry[]> {
   const q = `%${query.trim()}%`
   if (!query.trim()) return []
   const rows = await db
@@ -119,6 +129,7 @@ export async function searchMemories(query: string): Promise<MemoryEntry[]> {
     .where(
       and(
         notExpired,
+        ownedBy(userId),
         sql`(lower(${memory.name}) LIKE lower(${q}) OR lower(${memory.description}) LIKE lower(${q}) OR lower(${memory.content}) LIKE lower(${q}))`,
       ),
     )
@@ -127,8 +138,9 @@ export async function searchMemories(query: string): Promise<MemoryEntry[]> {
   return rows.map(toEntry)
 }
 
-/** 保存记忆；name 已存在（未过期）则覆盖更新（LLM 据此做去重/修订） */
+/** 保存当前用户的记忆；同名（未过期）则覆盖更新（LLM 据此做去重/修订） */
 export async function saveMemory(input: {
+  userId: string | null
   type: MemoryType
   name: string
   description: string
@@ -136,6 +148,7 @@ export async function saveMemory(input: {
   expiresAt?: Date | null
 }): Promise<MemoryEntry> {
   const values = {
+    userId: input.userId,
     type: input.type,
     name: input.name,
     description: input.description,
@@ -145,12 +158,12 @@ export async function saveMemory(input: {
 
   // 同名（未过期）→ 原地更新；否则插入新行。
   // check-then-act 存在窄竞态窗口（并发同名可能产生两行）：
-  // 单用户 demo + memory 工具独占锁（请求内串行）下不可触发，且重复行
+  // memory 工具独占锁（请求内串行）下不可触发，且重复行
   // 只会让注入索引多一条同义条目，无数据损坏，故不引入唯一索引（过期行需允许同名）。
   const [existing] = await db
     .select({ id: memory.id })
     .from(memory)
-    .where(and(eq(memory.name, input.name), notExpired))
+    .where(and(eq(memory.name, input.name), ownedBy(input.userId), notExpired))
     .limit(1)
 
   const rows = existing
@@ -164,9 +177,12 @@ export async function saveMemory(input: {
   return toEntry(saved)
 }
 
-/** 删除记忆；不存在返回 false */
-export async function deleteMemory(id: string): Promise<boolean> {
-  const [deleted] = await db.delete(memory).where(eq(memory.id, id)).returning({ id: memory.id })
+/** 删除当前用户的记忆；不存在或不属于该用户返回 false */
+export async function deleteMemory(id: string, userId: string | null): Promise<boolean> {
+  const [deleted] = await db
+    .delete(memory)
+    .where(and(eq(memory.id, id), ownedBy(userId)))
+    .returning({ id: memory.id })
   return Boolean(deleted)
 }
 

@@ -15,8 +15,9 @@ export async function buildRuntimeSystem(
   registry: ToolRegistry,
   sessionId: string,
   messageCount: number,
+  userId: string | null = null,
 ): Promise<string> {
-  const memories = await listActiveMemories()
+  const memories = await listActiveMemories(userId)
   await ragStore.ensureLoaded()
   return promptBuilder.build({
     toolCount: registry.getActiveTools().length,
