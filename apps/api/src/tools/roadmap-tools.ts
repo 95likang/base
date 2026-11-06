@@ -1,4 +1,5 @@
 import { toJsonSchemaParameters } from '../genui/spec'
+import { syncRoadmapReminder } from '../roadmap/reminder'
 import {
   areSessionTimesValid,
   isDateRangeValid,
@@ -59,6 +60,7 @@ export function createRoadmapTool(options: { chatId: string; userId: string }): 
         throw new Error('路线图内容不合法：训练结束时间必须晚于开始时间')
       }
       const row = await createRoadmap({ userId: options.userId, chatId: options.chatId, content })
+      await syncRoadmapReminder(row)
       return { roadmapId: row.id }
     },
   }

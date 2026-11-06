@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { createRoadmap } = vi.hoisted(() => ({ createRoadmap: vi.fn() }))
 vi.mock('../roadmap/store', () => ({ createRoadmap }))
 
+/** 提醒要写 cron_job 表，同样打桩，只验证落库后确实触发了同步 */
+const { syncRoadmapReminder } = vi.hoisted(() => ({ syncRoadmapReminder: vi.fn() }))
+vi.mock('../roadmap/reminder', () => ({ syncRoadmapReminder }))
+
 import { createRoadmapTool } from './roadmap-tools'
 
 function validInput() {
@@ -44,6 +48,7 @@ describe('practice_roadmap 工具', () => {
   beforeEach(() => {
     createRoadmap.mockReset()
     createRoadmap.mockResolvedValue({ id: 'roadmap-1' })
+    syncRoadmapReminder.mockReset()
   })
 
   it('合法输入写入后只返回 roadmapId', async () => {
@@ -52,6 +57,7 @@ describe('practice_roadmap 工具', () => {
 
     expect(result).toEqual({ roadmapId: 'roadmap-1' })
     expect(createRoadmap).toHaveBeenCalledTimes(1)
+    expect(syncRoadmapReminder).toHaveBeenCalledWith({ id: 'roadmap-1' })
 
     const [call] = createRoadmap.mock.calls
     expect(call[0].chatId).toBe('chat-1')

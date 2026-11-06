@@ -75,11 +75,14 @@ function SessionActions({
   phaseIndex,
   sessionIndex,
   session,
+  locked,
 }: {
   roadmapId: string
   phaseIndex: number
   sessionIndex: number
   session: SessionData
+  /** 上一场还没完成：按钮置灰，不能越序标记 */
+  locked: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -144,8 +147,17 @@ function SessionActions({
   if (!open) {
     const ahead = dayOffset(session.date)
     return (
-      <Button variant="outline" className="mt-3 w-full" onClick={() => setOpen(true)}>
-        {ahead !== null && ahead > 0 ? '提前完成这次' : '完成这次'}
+      <Button
+        variant="outline"
+        className="mt-3 w-full"
+        disabled={locked}
+        onClick={() => setOpen(true)}
+      >
+        {locked
+          ? '完成上一场训练后才能标记这场'
+          : ahead !== null && ahead > 0
+            ? '提前完成这次'
+            : '完成这次'}
       </Button>
     )
   }
@@ -239,6 +251,16 @@ export function RoadmapCard({
 }) {
   const { done, total, percent } = summarizeRoadmap(content)
   const meta = roadmapMetaLines(content)
+
+  // 训练按顺序解锁：上一场没完成时，后面所有「完成」按钮都置灰
+  const lockedSessions = new Set<string>()
+  let previousDone = true
+  for (const [phaseIndex, phase] of content.phases.entries()) {
+    for (const [sessionIndex, session] of phase.sessions.entries()) {
+      if (!previousDone) lockedSessions.add(`${phaseIndex}-${sessionIndex}`)
+      previousDone = session.status === 'done'
+    }
+  }
 
   // <details> 的 open 写成受控属性后，用户手动展开会被下次渲染弹回；
   // 用状态记录开关：初始只展开当前阶段与跳转目标阶段。
@@ -433,6 +455,7 @@ export function RoadmapCard({
                               phaseIndex={phaseIndex}
                               sessionIndex={sessionIndex}
                               session={session}
+                              locked={lockedSessions.has(`${phaseIndex}-${sessionIndex}`)}
                             />
                           ) : null}
                         </li>

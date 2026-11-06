@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { ApiError, validationHook } from '../lib/api-error'
 import { type AuthEnv, requireAuth } from '../lib/auth-guard'
+import { removeRoadmapReminder } from '../roadmap/reminder'
 import { completeSession, uncompleteSession } from '../roadmap/service'
 import { parseRoadmapContent, summarizeRoadmap } from '../roadmap/spec'
 import { deleteRoadmap, getRoadmap, listRoadmapContents, listRoadmaps } from '../roadmap/store'
@@ -57,9 +58,12 @@ export const roadmapsRoute = new Hono<AuthEnv>()
     return c.json({ roadmap })
   })
   .delete('/:id', async (c) => {
-    if (!(await deleteRoadmap(c.req.param('id'), c.get('authUser').id))) {
+    const id = c.req.param('id')
+    if (!(await deleteRoadmap(id, c.get('authUser').id))) {
       throw new ApiError('ROADMAP_NOT_FOUND', 'Roadmap not found.', 404)
     }
+    // 计划没了，指向它的开始提醒也必须一起消失
+    await removeRoadmapReminder(id)
     return c.json({ ok: true })
   })
   .post(

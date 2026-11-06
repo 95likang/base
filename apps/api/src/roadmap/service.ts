@@ -1,6 +1,7 @@
 import { generateText } from 'ai'
 import { defaultModel } from '../agent/model'
 import { ApiError } from '../lib/api-error'
+import { syncRoadmapReminder } from './reminder'
 import { parseRoadmapContent, type RoadmapContent, recomputeCurrentPhaseIndex } from './spec'
 import { getRoadmap, updateRoadmapContent } from './store'
 
@@ -48,6 +49,16 @@ export async function completeSession(input: {
   if (session.status === 'done') {
     throw new ApiError('SESSION_ALREADY_DONE', 'Session already completed.', 409)
   }
+  // 训练按顺序执行：前面的没完成，这一场不允许标记完成（前端按钮同样会锁住）
+  const ordered = content.phases.flatMap((phase, p) =>
+    phase.sessions.map((item, i) => ({ p, i, status: item.status })),
+  )
+  const position = ordered.findIndex(
+    (item) => item.p === input.phaseIndex && item.i === input.sessionIndex,
+  )
+  if (ordered.slice(0, position).some((item) => item.status !== 'done')) {
+    throw new ApiError('SESSION_LOCKED', 'Complete the previous session first.', 409)
+  }
 
   let feedback: string
   try {
@@ -79,6 +90,8 @@ export async function completeSession(input: {
   session.completedAt = new Date().toISOString()
   content.currentPhaseIndex = recomputeCurrentPhaseIndex(content)
   await updateRoadmapContent(input.roadmapId, content)
+  // 完成后提醒要指向下一场；全部完成则清掉旧提醒
+  await syncRoadmapReminder({ id: input.roadmapId, content })
   return content
 }
 
@@ -104,5 +117,7 @@ export async function uncompleteSession(input: {
   session.completedAt = undefined
   content.currentPhaseIndex = recomputeCurrentPhaseIndex(content)
   await updateRoadmapContent(input.roadmapId, content)
+  // 撤销后这场重新成为「下一场」，提醒跟着回到它的开始时刻
+  await syncRoadmapReminder({ id: input.roadmapId, content })
   return content
 }

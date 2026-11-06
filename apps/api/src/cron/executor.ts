@@ -71,13 +71,20 @@ export async function startCron(): Promise<void> {
 
       return reply.trim() || '(无输出)'
     },
-    sendReminder: async (text, jobId) => {
+    sendReminder: async (text, jobId, actions) => {
       // 按钮的 customId 由 channels/index.ts 解析：cron:<jobId>:<action>
-      const sent = await pushDiscord(text, [
-        { id: `cron:${jobId}:snooze`, label: '稍后提醒' },
-        { id: `cron:${jobId}:cancel`, label: '关闭提醒', style: 'danger' },
-      ])
-      return sent ? '提醒已推送' : 'Discord 未配置或未连接，提醒未推送'
+      const sent = await pushDiscord(
+        text,
+        actions === 'none'
+          ? undefined
+          : [
+              { id: `cron:${jobId}:snooze`, label: '稍后提醒' },
+              { id: `cron:${jobId}:cancel`, label: '关闭提醒', style: 'danger' },
+            ],
+      )
+      // 推送失败必须抛错：一次性任务执行完即删除，吞掉返回值会让日志记成 success 而提醒其实丢了
+      if (!sent) throw new Error('Discord 未配置或未连接，提醒未推送')
+      return '提醒已推送'
     },
     notify: (message) => {
       console.log(`\n${message}`)

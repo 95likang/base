@@ -90,6 +90,11 @@ const ServerConfigSchema = z.object({
     .default(() =>
       splitList(process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3001'),
     ),
+  /** 前端站点地址，用于拼接推送给用户的消息里的链接 */
+  webUrl: z
+    .string()
+    .default(() => process.env.WEB_URL ?? 'http://localhost:3001')
+    .transform((url) => url.replace(/\/+$/, '')),
 })
 
 const DatabaseConfigSchema = z.object({

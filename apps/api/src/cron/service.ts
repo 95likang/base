@@ -32,8 +32,8 @@ const QUOTES = [
 /** 执行能力由外部注入：CronService 不直接依赖 Agent Loop，便于测试与替换 */
 export interface CronExecutor {
   runAgentPrompt: (prompt: string, timeout?: number) => Promise<string>
-  /** 推送提醒（Discord 带确认按钮） */
-  sendReminder: (text: string, jobId: string) => Promise<string>
+  /** 推送提醒；actions 为 'none' 时不附带「稍后 / 关闭」按钮 */
+  sendReminder: (text: string, jobId: string, actions?: 'none') => Promise<string>
   notify?: (message: string) => void
 }
 
@@ -291,7 +291,7 @@ export class CronService {
       return this.executor.runAgentPrompt(payload.prompt, timeout)
     }
     if (payload.type === 'reminder') {
-      return this.executor.sendReminder(payload.text, config.id)
+      return this.executor.sendReminder(payload.text, config.id, payload.actions)
     }
     if (payload.handler === 'random-quote') {
       return QUOTES[Math.floor(Math.random() * QUOTES.length)] ?? QUOTES[0] ?? ''

@@ -33,8 +33,11 @@ export interface CronJobConfig {
 export type JobPayload =
   | { type: 'agent'; prompt: string }
   | { type: 'handler'; handler: string }
-  /** 直接推送提醒文本（不走 Agent），附带「稍后提醒 / 关闭」按钮 */
-  | { type: 'reminder'; text: string }
+  /**
+   * 直接推送提醒文本（不走 Agent）。
+   * 默认附带「稍后提醒 / 关闭」按钮；一次性的语义化提醒（如计划开始）设 actions: 'none' 只发纯文本。
+   */
+  | { type: 'reminder'; text: string; actions?: 'none' }
 
 /** 提醒文本长度上限：Discord 单条消息 2000 字符，留出 @ 与按钮结果余量 */
 export const MAX_REMINDER_LENGTH = 1500

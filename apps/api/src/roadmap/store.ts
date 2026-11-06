@@ -45,6 +45,19 @@ export async function listRoadmapContents(userId: string): Promise<RoadmapConten
   return rows.map((row) => row.content)
 }
 
+/** 会话删除前查一次：一个会话最多一条计划，用于清理它的开始提醒 */
+export async function findRoadmapIdByChatId(
+  chatId: string,
+  userId: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ id: practiceRoadmap.id })
+    .from(practiceRoadmap)
+    .where(and(eq(practiceRoadmap.chatId, chatId), eq(practiceRoadmap.userId, userId)))
+    .limit(1)
+  return row?.id
+}
+
 /** 按 id 取当前用户的计划；不存在或不属于该用户返回 null，由路由层转 404 */
 export async function getRoadmap(id: string, userId: string): Promise<PracticeRoadmapRow | null> {
   const [row] = await db

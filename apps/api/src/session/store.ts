@@ -3,6 +3,8 @@ import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../db'
 import { type Chat, chat, chatMessage, toUIMessage } from '../db/chat-schema'
 import { ApiError } from '../lib/api-error'
+import { removeRoadmapReminder } from '../roadmap/reminder'
+import { findRoadmapIdByChatId } from '../roadmap/store'
 
 /**
  * 会话持久化：chat / chatMessage 的数据访问函数。
@@ -28,12 +30,23 @@ export async function createChat(userId: string): Promise<Chat> {
 
 /** 删除会话（消息级联删除）；不属于当前用户或不存在时抛 404 */
 export async function deleteChat(id: string, userId: string): Promise<void> {
+  // 计划随会话级联删除，但它的开始提醒不在数据库里，必须在删前拿到 id 单独清理
+  const roadmapId = await findRoadmapIdByChatId(id, userId)
   const [deleted] = await db
     .delete(chat)
     .where(and(eq(chat.id, id), eq(chat.userId, userId)))
     .returning({ id: chat.id })
   if (!deleted) {
     throw new ApiError('CHAT_NOT_FOUND', 'Chat not found.', 404)
+  }
+  if (roadmapId) {
+    try {
+      await removeRoadmapReminder(roadmapId)
+    } catch (err) {
+      // 会话已经删掉了，清理提醒失败不能把请求变成 500（用户重试只会拿到 404）
+      const message = err instanceof Error ? err.message : String(err)
+      console.log(`  [session] 清理计划提醒失败: ${message}`)
+    }
   }
 }
 

@@ -59,6 +59,10 @@ const routes = app
 const port = config.server.port
 serve({ fetch: app.fetch, port }, async (info) => {
   console.log(`🚀 API listening on http://localhost:${info.port}`)
+  // 推送消息里的链接依赖 WEB_URL；生产环境漏配会发出指向 localhost 的死链
+  if (process.env.NODE_ENV === 'production' && config.server.webUrl === 'http://localhost:3001') {
+    console.log('  ⚠ 未配置 WEB_URL，推送消息里的链接将指向 http://localhost:3001')
+  }
   // MCP 预热：启动时后台连接（不阻塞监听），首个对话请求不再承担 npx 拉起子进程的耗时
   void getMcpTools()
   // 插件按配置加载：空列表视为未配置，加载全部；enabled=false 的跳过
