@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { redirectToLogin } from '@/lib/auth-redirect'
 
 /** 同源 rewrite 代理到 API（next.config.ts），部署时不依赖固定端口 */
 const API = ''
@@ -25,6 +26,10 @@ export default function ChatListPage() {
 
   const refreshChats = useCallback(async () => {
     const res = await fetch(`${API}/api/chats`)
+    if (res.status === 401) {
+      redirectToLogin('/chat')
+      return
+    }
     if (!res.ok) throw new Error('load failed')
     const data = await res.json()
     setChats(data.chats ?? [])
@@ -47,6 +52,10 @@ export default function ChatListPage() {
     setError('')
     try {
       const res = await fetch(`${API}/api/chats`, { method: 'POST' })
+      if (res.status === 401) {
+        redirectToLogin('/chat')
+        return
+      }
       if (!res.ok) throw new Error(`创建会话失败（${res.status}）`)
       const { chat } = await res.json()
       router.push(`/chat/${chat.id}`)
@@ -61,6 +70,10 @@ export default function ChatListPage() {
     setError('')
     try {
       const res = await fetch(`${API}/api/chats/${id}`, { method: 'DELETE' })
+      if (res.status === 401) {
+        redirectToLogin('/chat')
+        return
+      }
       if (!res.ok) throw new Error('delete failed')
       await refreshChats()
     } catch {

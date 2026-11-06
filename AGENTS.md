@@ -29,6 +29,7 @@
 - 页面看起来正常但点击无反应、`main` 等节点没有 `__reactFiber` → `<dialog>` 被放在 `<span>` 里属于无效嵌套（span 只允许短语内容），浏览器解析结果与 SSR HTML 不一致，该段 hydration 整段失败 → 外层容器改用 `div` 等允许流内容的元素。
 - 复验页面时误判"hydration 失败/按钮无反应" → build 后重启 dev，旧标签页仍持有失效 chunk，HMR 拉取 hot-update 报 `ERR_ABORTED` → 验证前开新标签页或加缓存穿透参数重新加载，别在旧页面上判断。
 - 给已有数据的表用 `drizzle-kit push` 加 `NOT NULL` 列会因存量行为空而失败 → 新列无默认值，PG 无法直接补非空约束 → 先手动 `ALTER TABLE ... ADD COLUMN`（先可空）并按业务回填历史行，再执行 push 让 drizzle 补 `NOT NULL`、外键与索引。
+- 对话要等模型全部生成完才一次性出现、思考过程不流式 → Next 默认对 rewrite 代理的 `/api` 响应启用 gzip，压缩层攒满缓冲区才 flush，SSE 分片被整段缓冲（响应头 `content-encoding: gzip`，直连 API 则是 `null`）→ `next.config.ts` 设 `compress: false`，让 SSE 绕过压缩层。
 - 以为 `next/font/google` 的 Noto Sans SC 拿不到中文字形（metadata 里 `subsets` 只有 latin/cyrillic 等，没有 chinese-simplified）→ 实际 next/font 会按整份 CSS 下载全部 unicode-range 分片，`subsets` 只影响 preload → 想要中文标题字体时无需自建子集，配 `weight: 'variable'`（一份切片覆盖 100–900，避免 800 字重被浏览器合成）并 `preload: false` 即可。
 
 <!-- BEGIN:turborepo-agent-rules -->

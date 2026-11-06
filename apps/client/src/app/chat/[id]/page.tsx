@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { GenUIPart, isGenUIPart } from '@/genui/render'
+import { redirectToLogin } from '@/lib/auth-redirect'
 import { isRoadmapPart, RoadmapPart } from '@/roadmap/RoadmapPart'
 import { contextCommand } from '../commands/context'
 import { dreamCommand, lintCommand, memoryCommand } from '../commands/memory'
@@ -138,6 +139,10 @@ export default function ChatDetailPage() {
     setLoadError(null)
     fetch(`${API}/api/chats/${chatId}/messages`)
       .then(async (res) => {
+        if (res.status === 401) {
+          redirectToLogin(`/chat/${chatId}`)
+          return null
+        }
         if (!res.ok) {
           if (!cancelled) setLoadError(res.status === 404 ? 'notfound' : 'failed')
           return null
@@ -311,10 +316,9 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
           <LintPanel total={panel.total} reports={panel.reports} onClose={() => setPanel(null)} />
         )}
         {messages.map((message) => {
-          const reasoning = message.parts
-            .filter((part) => part.type === 'reasoning')
-            .map((part) => part.text)
-            .join('')
+          // 思考过程默认折叠，点击展开；仍在生成的回复在标题旁给出脉冲提示
+          const isLatestAssistant =
+            message.role === 'assistant' && message.id === messages[messages.length - 1]?.id
           return (
             <div
               key={message.id}
@@ -331,16 +335,28 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
               >
                 {message.role === 'user' ? '你' : 'AI'}
               </p>
-              {reasoning && (
-                <details className="mb-2 rounded-md bg-background/30 px-2 py-1 text-sm">
-                  <summary className="cursor-pointer text-xs font-bold text-muted-foreground select-none">
-                    思考过程
-                  </summary>
-                  <p className="mt-1 whitespace-pre-wrap">{reasoning}</p>
-                </details>
-              )}
-              {/* 按 parts 顺序渲染：文本段落与卡片保持模型输出的先后关系 */}
+              {/* 按 parts 顺序渲染：思考过程、文本段落与卡片保持模型输出的先后关系 */}
               {message.parts.map((part, i) => {
+                if (part.type === 'reasoning') {
+                  if (!part.text.trim()) return null
+                  return (
+                    <details
+                      // biome-ignore lint/suspicious/noArrayIndexKey: reasoning part 无稳定 id，顺序即身份
+                      key={`reasoning:${i}`}
+                      className="mb-2 rounded-xl border-2 border-border bg-background/60 px-3 py-2 text-sm"
+                    >
+                      <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+                        {busy && isLatestAssistant && i === message.parts.length - 1 && (
+                          <span className="size-1.5 animate-pulse rounded-full bg-accent" />
+                        )}
+                        思考过程
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed text-muted-foreground">
+                        {part.text}
+                      </p>
+                    </details>
+                  )
+                }
                 if (part.type === 'text') {
                   if (!part.text.trim()) return null
                   return (
@@ -388,7 +404,13 @@ function ChatPanel({ chatId, initialMessages }: { chatId: string; initialMessage
             </div>
           )
         })}
-        {status === 'submitted' && <p className="text-sm text-muted-foreground">思考中…</p>}
+        {status === 'submitted' && (
+          <p className="flex items-center gap-1" role="status" aria-label="等待模型响应">
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground" />
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:120ms]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:240ms]" />
+          </p>
+        )}
         {error && (
           <p role="alert" className="text-sm text-destructive">
             发送失败，请检查网络后重新发送。
