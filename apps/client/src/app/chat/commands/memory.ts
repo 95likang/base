@@ -1,4 +1,5 @@
-import { API, type CommandHandler } from './types'
+import { apiFetch } from '@/lib/http'
+import type { CommandHandler, LintReport, MemoryItem } from './types'
 
 /**
  * /memory：持久记忆管理面板。
@@ -6,7 +7,7 @@ import { API, type CommandHandler } from './types'
  */
 export const memoryCommand: CommandHandler = async (cmd, { showPanel }) => {
   if (cmd !== '/memory') return false
-  const data = await fetch(`${API}/api/memory`).then((res) => res.json())
+  const data = await apiFetch<{ memories?: MemoryItem[] }>('/api/memory')
   showPanel({ kind: 'memory', items: data.memories ?? [] })
   return true
 }
@@ -16,7 +17,7 @@ export const memoryCommand: CommandHandler = async (cmd, { showPanel }) => {
  */
 export const lintCommand: CommandHandler = async (cmd, { showPanel }) => {
   if (cmd !== '/lint') return false
-  const data = await fetch(`${API}/api/memory/lint`).then((res) => res.json())
+  const data = await apiFetch<{ total?: number; reports?: LintReport[] }>('/api/memory/lint')
   showPanel({ kind: 'lint', total: data.total ?? 0, reports: data.reports ?? [] })
   return true
 }

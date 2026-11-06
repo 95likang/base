@@ -1,6 +1,5 @@
 'use client'
 
-import { parseRoadmapContent } from 'api/roadmap/spec'
 import { CheckCircle2, ClipboardList, LogIn, LogOut } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { authClient } from '@/lib/auth-client'
+import { ApiError, apiFetch } from '@/lib/http'
 
 type PracticeStats = { plans: number; done: number; total: number }
 
@@ -19,30 +19,17 @@ export default function MePage() {
   const [stats, setStats] = useState<PracticeStats | null>(null)
   const [statsFailed, setStatsFailed] = useState(false)
 
+  // 只取聚合数字，不把全部计划内容拉到浏览器
   useEffect(() => {
     let cancelled = false
-    fetch('/api/roadmaps')
-      .then((res) => (res.ok ? res.json() : null))
+    apiFetch<PracticeStats>('/api/roadmaps/stats')
       .then((data) => {
-        if (cancelled) return
-        if (!data) {
-          setStatsFailed(true)
-          return
-        }
-        const rows = (data.roadmaps ?? []) as Array<{ content: unknown }>
-        const contents = rows.flatMap((row) => {
-          const content = parseRoadmapContent(row.content)
-          return content ? [content] : []
-        })
-        const sessions = contents.flatMap((content) => content.phases.flatMap((p) => p.sessions))
-        setStats({
-          plans: contents.length,
-          done: sessions.filter((session) => session.status === 'done').length,
-          total: sessions.length,
-        })
+        if (!cancelled) setStats(data)
       })
-      .catch(() => {
-        if (!cancelled) setStatsFailed(true)
+      .catch((err) => {
+        // 401 已在 apiFetch 内跳转登录
+        if (cancelled || (err instanceof ApiError && err.status === 401)) return
+        setStatsFailed(true)
       })
     return () => {
       cancelled = true

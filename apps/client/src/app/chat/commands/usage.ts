@@ -1,4 +1,5 @@
-import { API, type CommandHandler } from './types'
+import { apiFetch } from '@/lib/http'
+import type { CommandHandler, UsageTotals } from './types'
 
 /**
  * /usage：成本用量面板。
@@ -7,8 +8,8 @@ import { API, type CommandHandler } from './types'
 export const usageCommand: CommandHandler = async (cmd, { chatId, showPanel }) => {
   if (cmd !== '/usage' && cmd !== '/usage all') return false
   const all = cmd === '/usage all'
-  const query = !all && chatId ? `?chatId=${chatId}` : ''
-  const data = await fetch(`${API}/api/usage${query}`).then((res) => res.json())
+  const query = !all && chatId ? `?chatId=${encodeURIComponent(chatId)}` : ''
+  const data = await apiFetch<{ totals: UsageTotals }>(`/api/usage${query}`)
   showPanel({
     kind: 'usage',
     totals: data.totals,

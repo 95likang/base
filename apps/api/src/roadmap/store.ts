@@ -36,6 +36,15 @@ export async function listRoadmaps(userId: string): Promise<PracticeRoadmapRow[]
     .orderBy(desc(practiceRoadmap.updatedAt))
 }
 
+/** 统计用：只取 content 列，避免把 id / 时间等字段一起读出来 */
+export async function listRoadmapContents(userId: string): Promise<RoadmapContent[]> {
+  const rows = await db
+    .select({ content: practiceRoadmap.content })
+    .from(practiceRoadmap)
+    .where(eq(practiceRoadmap.userId, userId))
+  return rows.map((row) => row.content)
+}
+
 /** 按 id 取当前用户的计划；不存在或不属于该用户返回 null，由路由层转 404 */
 export async function getRoadmap(id: string, userId: string): Promise<PracticeRoadmapRow | null> {
   const [row] = await db

@@ -10,12 +10,18 @@ import { Label } from '@/components/ui/label'
 import { authClient } from '@/lib/auth-client'
 
 /**
- * 登录后的目标页：只接受站内路径，避免 redirect 参数被用作开放重定向。
+ * 登录后的目标页：只接受同源路径，避免 redirect 参数被用作开放重定向。
+ * 用 URL 解析而不是字符串前缀判断：`//host`、`/\host` 这类写法会被浏览器
+ * 规范化成站外地址，只有 origin 一致才安全。
  * 仅在浏览器端调用（useEffect / 事件回调）。
  */
 function resolveRedirect(): string {
   const redirect = new URLSearchParams(window.location.search).get('redirect')
-  return redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : '/plans'
+  if (!redirect) return '/plans'
+  const target = new URL(redirect, window.location.origin)
+  return target.origin === window.location.origin
+    ? `${target.pathname}${target.search}${target.hash}`
+    : '/plans'
 }
 
 /** 登录/注册页：走同源 rewrite 代理，成功后回到被拦截前想访问的页面。 */

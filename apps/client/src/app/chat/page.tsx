@@ -8,10 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { redirectToLogin } from '@/lib/auth-redirect'
-
-/** 同源 rewrite 代理到 API（next.config.ts），部署时不依赖固定端口 */
-const API = ''
+import { ApiError, apiFetch } from '@/lib/http'
 
 type ChatSummary = { id: string; title: string; updatedAt: string }
 
@@ -25,13 +22,7 @@ export default function ChatListPage() {
   const [error, setError] = useState('')
 
   const refreshChats = useCallback(async () => {
-    const res = await fetch(`${API}/api/chats`)
-    if (res.status === 401) {
-      redirectToLogin('/chat')
-      return
-    }
-    if (!res.ok) throw new Error('load failed')
-    const data = await res.json()
+    const data = await apiFetch<{ chats?: ChatSummary[] }>('/api/chats')
     setChats(data.chats ?? [])
   }, [])
 
@@ -39,7 +30,11 @@ export default function ChatListPage() {
     setError('')
     setLoading(true)
     return refreshChats()
-      .catch(() => setError('加载会话失败，请稍后重试。'))
+      .catch((err) => {
+        if (!(err instanceof ApiError && err.status === 401)) {
+          setError('加载会话失败，请稍后重试。')
+        }
+      })
       .finally(() => setLoading(false))
   }, [refreshChats])
 
@@ -51,15 +46,13 @@ export default function ChatListPage() {
     setCreating(true)
     setError('')
     try {
-      const res = await fetch(`${API}/api/chats`, { method: 'POST' })
-      if (res.status === 401) {
-        redirectToLogin('/chat')
-        return
-      }
-      if (!res.ok) throw new Error(`创建会话失败（${res.status}）`)
-      const { chat } = await res.json()
+      const { chat } = await apiFetch<{ chat: { id: string } }>('/api/chats', {
+        method: 'POST',
+      })
       router.push(`/chat/${chat.id}`)
-    } catch {
+    } catch (err) {
+      // 401 已跳登录页，不必再提示
+      if (err instanceof ApiError && err.status === 401) return
       setError('创建会话失败，请重试。')
       setCreating(false)
     }
@@ -69,14 +62,12 @@ export default function ChatListPage() {
     setPendingDelete(null)
     setError('')
     try {
-      const res = await fetch(`${API}/api/chats/${id}`, { method: 'DELETE' })
-      if (res.status === 401) {
-        redirectToLogin('/chat')
-        return
-      }
-      if (!res.ok) throw new Error('delete failed')
+      await apiFetch(`/api/chats/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
       await refreshChats()
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return
       setError('删除会话失败，请重试。')
     }
   }

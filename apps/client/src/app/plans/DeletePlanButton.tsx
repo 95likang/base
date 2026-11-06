@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { ApiError, apiFetch } from '@/lib/http'
 
 /**
  * 删除计划。列表页与详情页共用：
@@ -21,16 +22,12 @@ export function DeletePlanButton({ id, redirectTo }: { id: string; redirectTo?: 
     setDeleting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/roadmaps/${id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: { message?: string }
-        } | null
-        throw new Error(body?.error?.message ?? '删除失败，请重试。')
-      }
+      await apiFetch(`/api/roadmaps/${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (redirectTo) router.push(redirectTo)
       else router.refresh()
     } catch (err) {
+      // 401 已在 apiFetch 内跳转登录
+      if (err instanceof ApiError && err.status === 401) return
       setError(err instanceof Error ? err.message : '删除失败，请重试。')
       setDeleting(false)
     }

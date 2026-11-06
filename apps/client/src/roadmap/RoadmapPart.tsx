@@ -4,14 +4,17 @@ import {
   PRACTICE_ROADMAP_TOOL_NAME,
   parseRoadmapContent,
   type RoadmapContent,
+  summarizeRoadmap,
 } from 'api/roadmap/spec'
 import { CheckCircle2, ChevronDown, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { dayOffset } from '@/lib/date'
+import { ApiError, apiFetch } from '@/lib/http'
+import { roadmapMetaLines } from './summary'
 
 /** UI 消息里 tool part 的最小形状（AI SDK 的联合类型在这里不需要细分） */
 type RoadmapPartShape = {
@@ -55,15 +58,6 @@ function RoadmapFailure({ detail }: { detail: string }) {
   )
 }
 
-/** 整体进度：全计划的已完成次数 / 总次数 */
-function progressOf(content: RoadmapContent) {
-  const sessions = content.phases.flatMap((phase) => phase.sessions)
-  return {
-    done: sessions.filter((session) => session.status === 'done').length,
-    total: sessions.length,
-  }
-}
-
 /** 判据可能是一条，也可能是分号隔开的多条；全部列出，避免用户为没看到的内容背书 */
 function criteriaLines(criteria: string): string[] {
   return criteria
@@ -99,13 +93,14 @@ function SessionActions({
     setUndoing(true)
     setError(null)
     try {
-      const res = await fetch(
-        `/api/roadmaps/${roadmapId}/sessions/${phaseIndex}/${sessionIndex}/uncomplete`,
+      await apiFetch(
+        `/api/roadmaps/${encodeURIComponent(roadmapId)}/sessions/${phaseIndex}/${sessionIndex}/uncomplete`,
         { method: 'POST' },
       )
-      if (!res.ok) throw new Error('撤销失败，请重试。')
       router.refresh()
     } catch (err) {
+      // 401 已在 apiFetch 内跳转登录
+      if (err instanceof ApiError && err.status === 401) return
       setError(err instanceof Error ? err.message : '撤销失败，请重试。')
       setUndoing(false)
     }
@@ -160,22 +155,17 @@ function SessionActions({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(
-        `/api/roadmaps/${roadmapId}/sessions/${phaseIndex}/${sessionIndex}/complete`,
+      await apiFetch(
+        `/api/roadmaps/${encodeURIComponent(roadmapId)}/sessions/${phaseIndex}/${sessionIndex}/complete`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ note: text }),
         },
       )
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: { message?: string }
-        } | null
-        throw new Error(body?.error?.message ?? '提交失败，请重试。')
-      }
       router.refresh()
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return
       setError(err instanceof Error ? err.message : '提交失败，请重试。')
       setSubmitting(false)
     }
@@ -247,14 +237,38 @@ export function RoadmapCard({
   /** 详情页用 h1，对话内嵌卡片用 h2，避免一页多个 h1 */
   titleAs?: 'h1' | 'h2'
 }) {
-  const { done, total } = progressOf(content)
-  const percent = Math.round((done / total) * 100)
-  const meta = [
-    content.startDate && content.endDate ? `${content.startDate} 至 ${content.endDate}` : null,
-    content.overallDuration ? `总周期 ${content.overallDuration}` : null,
-    content.sessionsPerWeek ? `每周 ${content.sessionsPerWeek} 次` : null,
-    content.sessionMinutes ? `每次 ${content.sessionMinutes} 分钟` : null,
-  ].filter((text): text is string => Boolean(text))
+  const { done, total, percent } = summarizeRoadmap(content)
+  const meta = roadmapMetaLines(content)
+
+  // <details> 的 open 写成受控属性后，用户手动展开会被下次渲染弹回；
+  // 用状态记录开关：初始只展开当前阶段与跳转目标阶段。
+  const [openPhases, setOpenPhases] = useState<ReadonlySet<number>>(
+    () =>
+      new Set([
+        content.currentPhaseIndex,
+        ...(focusPhaseIndex === undefined ? [] : [focusPhaseIndex]),
+      ]),
+  )
+  useEffect(() => {
+    setOpenPhases(
+      (prev) =>
+        new Set([
+          ...prev,
+          content.currentPhaseIndex,
+          ...(focusPhaseIndex === undefined ? [] : [focusPhaseIndex]),
+        ]),
+    )
+  }, [content.currentPhaseIndex, focusPhaseIndex])
+
+  const togglePhase = (phaseIndex: number, opened: boolean) => {
+    setOpenPhases((prev) => {
+      if (opened === prev.has(phaseIndex)) return prev
+      const next = new Set(prev)
+      if (opened) next.add(phaseIndex)
+      else next.delete(phaseIndex)
+      return next
+    })
+  }
 
   return (
     <section className="flex flex-col gap-4">
@@ -313,7 +327,8 @@ export function RoadmapCard({
             // biome-ignore lint/suspicious/noArrayIndexKey: 阶段没有稳定 id，顺序即身份
             <li key={phaseIndex}>
               <details
-                open={active || phaseIndex === focusPhaseIndex}
+                open={openPhases.has(phaseIndex)}
+                onToggle={(event) => togglePhase(phaseIndex, event.currentTarget.open)}
                 className="group rounded-xl border-2 border-foreground bg-card shadow-card"
               >
                 <summary className="flex cursor-pointer list-none items-start gap-2 p-4 [&::-webkit-details-marker]:hidden">
@@ -460,7 +475,7 @@ function RoadmapSummary({
   content: RoadmapContent
   roadmapId: string | null
 }) {
-  const { total } = progressOf(content)
+  const { total } = summarizeRoadmap(content)
 
   return (
     <section className="rounded-xl border-2 border-foreground bg-card p-4 shadow-card">

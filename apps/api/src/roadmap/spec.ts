@@ -135,6 +135,25 @@ export function recomputeCurrentPhaseIndex(content: RoadmapContent): number {
 }
 
 /**
+ * 计划进度摘要：已完成 / 总数 / 完成百分比 / 下一次训练。
+ * 列表、详情、对话卡与统计接口共用这一口径，避免各处各算一套。
+ */
+export function summarizeRoadmap(content: RoadmapContent) {
+  const sessions = content.phases.flatMap((phase, phaseIndex) =>
+    phase.sessions.map((session, sessionIndex) => ({ session, phaseIndex, sessionIndex })),
+  )
+  const done = sessions.filter(({ session }) => session.status === 'done').length
+  const total = sessions.length
+  return {
+    done,
+    total,
+    // schema 保证至少一次训练，这里兜底只为避免除零得到 NaN
+    percent: total > 0 ? Math.round((done / total) * 100) : 0,
+    next: sessions.find(({ session }) => session.status !== 'done') ?? null,
+  }
+}
+
+/**
  * 校验并重建路线图内容。
  *
  * schema 本身能被 z.toJSONSchema 完整表达（故不使用 refine），

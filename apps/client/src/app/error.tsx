@@ -1,14 +1,21 @@
 'use client'
 
+import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 
-/** 全局错误边界：不暴露技术错误，只给可执行的下一步 */
-export default function GlobalError({
+/** 路由级错误边界：捕获页面渲染异常，不暴露技术错误，只给可执行的下一步 */
+export default function RouteError({
+  error,
   reset,
 }: {
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  // 线上排障只靠这句日志定位（页面不展示 digest）
+  useEffect(() => {
+    console.error('[route] 页面渲染失败:', error.digest ?? error.message, error)
+  }, [error])
+
   return (
     <main className="flex flex-col gap-4 p-6">
       <h1 className="text-2xl">页面没能加载</h1>

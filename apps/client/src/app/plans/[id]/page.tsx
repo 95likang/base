@@ -1,4 +1,4 @@
-import { parseRoadmapContent } from 'api/roadmap/spec'
+import { parseRoadmapContent, summarizeRoadmap } from 'api/roadmap/spec'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
@@ -47,14 +47,8 @@ export default async function PlanDetailPage({
 
   const { roadmap } = await res.json()
   const content = parseRoadmapContent(roadmap.content)
-  // 下一次训练：第一个未完成的条目，和「我的计划」列表口径一致
-  const next = content
-    ? (content.phases
-        .flatMap((p, phaseIndex) =>
-          p.sessions.map((session, sessionIndex) => ({ session, phaseIndex, sessionIndex })),
-        )
-        .find(({ session }) => session.status !== 'done') ?? null)
-    : null
+  // 下一次训练：与「我的计划」列表共用同一口径
+  const next = content ? summarizeRoadmap(content).next : null
   const rel = next ? relativeDay(next.session.date) : null
 
   return (

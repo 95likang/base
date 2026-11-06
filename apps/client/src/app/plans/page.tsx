@@ -1,4 +1,4 @@
-import { parseRoadmapContent } from 'api/roadmap/spec'
+import { parseRoadmapContent, summarizeRoadmap } from 'api/roadmap/spec'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/card'
 import { createAuthedServerClient } from '@/lib/api'
 import { relativeDay } from '@/lib/date'
+import { roadmapMetaLines } from '@/roadmap/summary'
 import { DeletePlanButton } from './DeletePlanButton'
 
 export const dynamic = 'force-dynamic'
@@ -47,22 +48,8 @@ export default async function PlansPage() {
   const items = roadmaps.flatMap((row) => {
     const content = parseRoadmapContent(row.content)
     if (!content) return []
-    const sessions = content.phases.flatMap((phase, phaseIndex) =>
-      phase.sessions.map((session, sessionIndex) => ({
-        session,
-        phaseIndex,
-        sessionIndex,
-      })),
-    )
-    return [
-      {
-        id: row.id,
-        content,
-        done: sessions.filter(({ session }) => session.status === 'done').length,
-        total: sessions.length,
-        next: sessions.find(({ session }) => session.status !== 'done') ?? null,
-      },
-    ]
+    const { done, total, percent, next } = summarizeRoadmap(content)
+    return [{ id: row.id, content, done, total, percent, next }]
   })
 
   const hidden = roadmaps.length - items.length
@@ -99,16 +86,8 @@ export default async function PlansPage() {
         </Card>
       ) : (
         <ul className="flex flex-col gap-4">
-          {items.map(({ id, content, done, total, next }) => {
-            const meta = [
-              content.startDate && content.endDate
-                ? `${content.startDate} 至 ${content.endDate}`
-                : null,
-              content.overallDuration ? `总周期 ${content.overallDuration}` : null,
-              content.sessionsPerWeek ? `每周 ${content.sessionsPerWeek} 次` : null,
-              content.sessionMinutes ? `每次 ${content.sessionMinutes} 分钟` : null,
-            ].filter((text): text is string => Boolean(text))
-            const percent = Math.round((done / total) * 100)
+          {items.map(({ id, content, done, total, percent, next }) => {
+            const meta = roadmapMetaLines(content)
             const rel = next ? relativeDay(next.session.date) : null
 
             return (

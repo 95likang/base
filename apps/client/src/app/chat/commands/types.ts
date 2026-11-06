@@ -71,6 +71,3 @@ export function createDispatcher(handlers: CommandHandler[]): CommandHandler {
     return false
   }
 }
-
-/** API 地址（与 page.tsx 共用；客户端组件直连 Hono） */
-export const API = 'http://localhost:3000'
