@@ -38,14 +38,21 @@ pm2 restart base-api --update-env
 sleep 10
 pm2 restart base-client --update-env
 
-# Next 重启后有数秒不监听，nginx 会回 502，必须等端口真正可用
+# Next 重启后有数秒不监听，nginx 会回 502，必须等端口真正可用。
+# curl 的报错在等待期间是正常的，用 -s 静音，stderr 也丢掉，只保留最终结论。
+ready=0
 for _ in $(seq 1 30); do
-  if curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$CLIENT_PORT/login"; then
+  if curl -fs -m 3 -o /dev/null "http://127.0.0.1:$CLIENT_PORT/login" 2>/dev/null; then
+    ready=1
     echo "  client 已就绪"
     break
   fi
   sleep 2
 done
+if [ "$ready" -ne 1 ]; then
+  echo "  ❌ client 60 秒内未就绪，请查 /var/log/base/client-error.log" >&2
+  exit 1
+fi
 
 echo "==> 健康检查"
 curl -fsS -m 10 "http://127.0.0.1:$API_PORT/"
