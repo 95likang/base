@@ -120,19 +120,27 @@ nginx -t && systemctl reload nginx
 
 ## 三、仓库内的部署文件
 
-新项目需要复制这 6 个文件，然后按自己的情况改：
+新项目需要复制这 8 个文件，然后按自己的情况改：
 
 | 文件 | 作用 | 需要改什么 |
 | --- | --- | --- |
-| `scripts/deploy/config.env` | 主机、路径、端口 | IP、分支名、应用名 |
-| `scripts/deploy/ecosystem.config.cjs` | pm2 进程定义 | 应用名、`cwd`、端口、构建产物路径 |
+| `scripts/deploy/config.env` | 主机、路径、端口 | IP、分支名、端口 |
+| `scripts/deploy/ecosystem.config.cjs` | pm2 进程定义 | 应用名、`cwd`、端口、**运行时 env** |
 | `scripts/deploy/nginx-base.conf` | nginx 站点 | IP、upstream 端口、静态目录 |
 | `scripts/deploy/setup.sh` | 首次初始化 | 数据库名、PG 版本路径 |
 | `scripts/deploy/deploy.sh` | 本地一键发布 | 一般不用改 |
 | `scripts/deploy/remote-deploy.sh` | 服务器侧发布（本地和 CI 共用） | 分支名、端口、应用名 |
+| `scripts/deploy/run-as-deployer.sh` | CI 账户的强制命令 | 分支名（**须与 remote-deploy 一致**） |
 | `.github/workflows/deploy.yml` | CI/CD | 分支名 |
 
+> **端口和应用名有两份真相，必须手工同步**：`remote-deploy.sh` 跑在服务器上，
+> 读不到 `config.env`，所以它的 `API_PORT` / `CLIENT_PORT` / `APP_DIR` 是硬编码的。
+> 应用名 `base-api` / `base-client` 同样硬编码在 `ecosystem.config.cjs` 和
+> `remote-deploy.sh` 里。改端口或改名时，三处一起改。
+
 ### 3.1 `config.env`
+
+注意 `SSH_KEY` 只有 `deploy.sh` 和 `setup.sh` 用；`remote-deploy.sh` 跑在服务器上不读它。
 
 ```bash
 HOST=root@<服务器IP>
@@ -155,13 +163,29 @@ PUBLIC_URL=http://<服务器IP>
   interpreter: 'none',            // 关键：否则 pm2 会 node 套 node
   exec_mode: 'fork',
   instances: 1,                   // 关键：见架构约束 1
-  env: { NODE_ENV: 'production', PORT: 3100 },
+  env: {
+    NODE_ENV: 'production',
+    PORT: 3100,
+    // 用到自签证书的网关时必须有：Node 只在启动时读该变量，写在 .env 里无效
+    NODE_EXTRA_CA_CERTS: './wb-gateway.crt',
+  },
   error_file: '/var/log/base/api-error.log',
 }
 ```
 
-client 那项注意：next 的可执行入口在 **client 自己的** `node_modules` 里
-（pnpm workspace 不提升），路径是 `node_modules/next/dist/bin/next`。
+client 那项有两处容易漏：
+
+1. next 的可执行入口在 **client 自己的** `node_modules` 里
+   （pnpm workspace 不提升），路径是 `node_modules/next/dist/bin/next`
+2. **运行时也要注入 `API_URL`**：
+
+```js
+env: { NODE_ENV: 'production', API_URL: 'http://127.0.0.1:3100' },
+```
+
+原因：`apps/client/src/lib/api.ts` 在**运行时**读 `process.env.API_URL`
+（默认回落 `http://localhost:3000`），供 Server Component 直连 API。
+构建期的 `API_URL` 管的是浏览器侧 rewrite，两者不是同一件事，都要配。
 
 ### 3.3 `nginx-base.conf` 要点
 
@@ -189,9 +213,35 @@ location / {
     proxy_buffering off;
 }
 
+# 静态 SPA（如 admin）：alias 必须以 / 结尾，index 由 try_files 兜底
+location ^~ /admin/ {
+    alias /var/www/base-admin/;
+    try_files $uri $uri/ /admin/index.html;
+}
+
 # 图片以 base64 塞在 POST 请求体里，默认 1m 会被拦掉
 client_max_body_size 60m;
 ```
+
+### 3.3.1 `server_name` 必须匹配实际访问地址
+
+服务器上通常已经有一个 nginx 自带的默认站点：
+
+```nginx
+listen 80 default_server;
+server_name _;
+root /usr/share/nginx/html;
+```
+
+本项目的配置是 `listen 80;` + `server_name <IP>;`，**Host 对不上就落到那个默认站点**，
+表现为整站 404（实测 `curl -H 'Host: example.com' /login` → 404）。
+所以：
+
+- 用 IP 访问 → `server_name <IP>`
+- 用域名访问 → `server_name 你的域名`，或直接 `server_name _` 并在前面加 `default_server`
+
+另外，**配置要在仓库里改**：`setup.sh` 会用 `scp` 把
+`scripts/deploy/nginx-base.conf` 覆盖到服务器，直接在服务器上改会被冲掉。
 
 ---
 
@@ -209,9 +259,22 @@ ssh -i ~/.ssh/base_deploy_ed25519 root@<服务器IP> 'echo ok'
 > 检查服务器 `/root/.ssh/authorized_keys` 是不是被写成了两行
 > （key 和注释分开）。用 `wc -l` 确认，必须是每个 key 一行。
 
-### 步骤 2：放置生产环境变量
+### 步骤 2：第一次执行初始化脚本（会停在放 .env 那步）
 
-在服务器上创建 `apps/api/.env`（**不从本地同步，生产配置只存在服务器上**）：
+```bash
+scripts/deploy/setup.sh
+```
+
+它做 7 件事：建目录 → 初始化 PG → 建库 → **clone 代码** → 装依赖 →
+**检查 `.env`** → 推 schema → 放 nginx 配置 → 构建 + 启动 pm2 + 开机自启。
+
+**顺序有讲究**：`.env` 必须在 `db:push` 之前就位（`drizzle.config.ts` 靠
+`process.loadEnvFile()` 取 `DATABASE_URL`），而 `/srv/base` 又是 clone 出来的，
+所以第一次跑注定停在检查 `.env` 那一步并给出提示——这是设计如此，不是 bug。
+
+### 步骤 3：放好 `.env` 后重跑
+
+在服务器上创建 `/srv/base/apps/api/.env`（**不从本地同步，生产配置只存在服务器上**）：
 
 ```bash
 PORT=3100
@@ -221,20 +284,28 @@ BETTER_AUTH_SECRET="<openssl rand -base64 32>"
 CORS_ORIGINS="http://<服务器IP>"
 WEB_URL="http://<服务器IP>"
 TOOL_WORKSPACE_GUARD="true"    # 公网环境必须开启
-# 其余按需：ANTHROPIC_*、DASHSCOPE_API_KEY、FEISHU_* 等
+
+# 必填：缺了 API 直接启动失败（rag/service.ts 顶层就创建 embedder）
+DASHSCOPE_API_KEY="sk-xxx"
+
+# 公网部署必填：不配则任何登录用户都能切换全局角色（owner/collaborator/guest）
+ADMIN_EMAILS="you@example.com"
+
+# 其余按需：ANTHROPIC_*、FEISHU_*、DISCORD_* 等
 ```
 
-### 步骤 3：执行初始化脚本
+再执行一次同一个脚本，已完成的步骤都是幂等的，会从断点继续：
 
 ```bash
 scripts/deploy/setup.sh
 ```
 
-它做 7 件事：建目录 → 初始化 PG → 建库 → clone 代码 → 装依赖 + 推 schema →
-放 nginx 配置 → 构建 + 启动 pm2 + 设置开机自启。
-
 > 注意：`drizzle-kit push` 在非 TTY 环境下会卡在交互确认，
 > 脚本里用的是 `drizzle-kit push --force`。
+>
+> `setup.sh` 建库用的密码取自**本地** `apps/api/.env` 的 `DATABASE_URL`，
+> 与服务器上那份不一致会导致 API 连不上库。新项目没有本地 `.env` 时会回落到
+> `postgres`，此时务必保证服务器 `.env` 里也是同一个密码。
 
 ### 步骤 4：验证
 
@@ -386,26 +457,39 @@ pm2 startup systemd -u root --hp /root   # 开机自启
 | `/var/log/base/client-out.log` | Next 标准输出 |
 | `/var/log/base/client-error.log` | Next 错误 |
 
-### 数据目录（不在 git 里，重装时别删）
+### 数据目录（重装时别删）
 
-| 路径 | 内容 |
-| --- | --- |
-| `apps/api/.env` | 生产环境变量 |
-| `apps/api/src/.skills/` | 上传的技能（用户数据） |
-| `apps/api/workspace/` | 文件工具工作区 |
-| `apps/api/.usage/` `apps/api/.traces/` | 用量与跟踪日志 |
-| `apps/api/wb-gateway.crt` | 自签网关 CA（若使用） |
+| 路径 | 在 git 里？ | 内容 |
+| --- | --- | --- |
+| `apps/api/.env` | ❌ 否 | 生产环境变量 |
+| `apps/api/workspace/` | ❌ 否 | 文件工具工作区 |
+| `apps/api/.usage/` `apps/api/.traces/` | ❌ 否 | 用量与跟踪日志 |
+| `apps/api/src/.skills/` | ⚠️ 部分 | 种子技能在仓库里；**用户上传的是未跟踪文件** |
+| `apps/api/wb-gateway.crt` | ✅ 是 | 自签网关 CA（公开证书，可提交） |
+
+> `git checkout -B` 不会删未跟踪文件，所以上传的技能是安全的；
+> 但 `git clean -xdf` 会把它们连同 `run-as-deployer.sh` 一起删掉，别在 `/srv/base` 上跑。
 
 ### 回滚
 
+**完整回滚（推荐）**：重新推一次旧提交，走一遍 CI——
+
 ```bash
-cd /srv/base
-git log --oneline -5
-git checkout <上一个提交>
-pm2 restart base-api base-client
+git revert <坏提交>        # 或 git reset 后强推（不推荐）
+git push
 ```
 
-或者重新推一次旧代码走 CI。
+**只回滚 API（快速止血）**：
+
+```bash
+cd /srv/base
+git checkout <上一个提交>
+pm2 restart base-api       # API 跑的是源码（tsx），restart 即生效
+```
+
+> 注意这条路**只回滚后端**。client 服务的是构建产物 `.next/`，admin 服务的是
+> `/var/www/base-admin/` 里的静态文件，`git checkout` 都不会重建它们，
+> 所以前后端版本会不一致。要回滚前端必须重新构建。
 
 ---
 
@@ -424,6 +508,11 @@ pm2 restart base-api base-client
 | 部署后操作报 502 数秒 | Next 重启后有几秒不监听 | 发布脚本轮询端口直到可用 |
 | workflow 立即失败、0 个 job | job 级 `if` 引用了 `env` 上下文 | 分支名直接写死 |
 | workflow 完全不触发 | workflow 不在默认分支 | 把 workflow 合并到默认分支 |
+| `initdb: 错误: 不能使用root用户运行` | initdb 拒绝 root | `su - postgres -c "initdb ..."` |
+| `pg_isready: 未找到命令` | 未被 alternatives 链接到 /usr/bin | 用 `/usr/pgsql-16/bin/pg_isready` |
+| 访问任意路径都是 404（nginx 默认页） | Host 不匹配 `server_name`，落到 `default_server` | `server_name` 写实际访问地址，或用域名 |
+| API 启动即崩、pm2 无限重启 | `DASHSCOPE_API_KEY` 缺失（rag 模块顶层抛错） | 配好该 key，它是必填项 |
+| 部署脚本报 `Empty reply from server`（约 90s 后） | 到 github.com 的连接偶发阻塞 | `git fetch` 带重试（`remote-deploy.sh` 已内置） |
 | `git checkout` 报"可疑的仓库所有权" | 文件属主与运行 git 的用户不同 | `git config --global --add safe.directory <路径>` |
 | `pnpm install` 后 tsx 不可用 | esbuild 的构建脚本被跳过 | 一般仍可用；不行就 `pnpm approve-builds` |
 | SSE 对话要等全部生成完才显示 | 压缩/缓冲层攒满才 flush | `compress: false`、nginx `proxy_buffering off` 与 `gzip off` |
@@ -449,16 +538,17 @@ pm2 restart base-api base-client
 
 按顺序做：
 
-- [ ] 复制 `scripts/deploy/` 整个目录
+- [ ] 复制 `scripts/deploy/` 整个目录（8 个文件，含 `run-as-deployer.sh`）
 - [ ] 复制 `.github/workflows/deploy.yml`
-- [ ] 改 `config.env`：IP、分支、端口、应用名
-- [ ] 改 `ecosystem.config.cjs`：应用名、cwd、端口、构建产物路径
-- [ ] 改 `nginx-base.conf`：IP、端口、静态目录
-- [ ] 改 `remote-deploy.sh` 和 `run-as-deployer.sh` 里的分支名
+- [ ] 改 `config.env`：IP、分支、端口
+- [ ] 改 `ecosystem.config.cjs`：应用名、cwd、端口、**运行时 `API_URL` 和 `NODE_EXTRA_CA_CERTS`**
+- [ ] 改 `nginx-base.conf`：IP、`server_name`（必须匹配访问地址）、端口、静态目录
+- [ ] 改 `remote-deploy.sh` 和 `run-as-deployer.sh` 里的分支名与端口（与 `config.env` 手工同步）
 - [ ] 服务器装 Node / pnpm / pm2 / PostgreSQL
-- [ ] 建 `deployer` 账户 + authorized_keys + sudoers
-- [ ] 在服务器放 `apps/*/.env`
+- [ ] 建 `deployer` 账户 + authorized_keys（指向 `run-as-deployer.sh`）+ sudoers
 - [ ] 本地生成部署密钥并 ssh-copy-id
-- [ ] 跑 `scripts/deploy/setup.sh`
+- [ ] 第一次跑 `scripts/deploy/setup.sh`（会停在放 `.env` 那步）
+- [ ] 服务器放 `apps/api/.env`（含必填的 `DASHSCOPE_API_KEY` 与 `ADMIN_EMAILS`）
+- [ ] 再跑一次 `scripts/deploy/setup.sh` 完成剩余步骤
 - [ ] GitHub 配 4 个 Secrets
 - [ ] push 一次验证自动部署
