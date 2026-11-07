@@ -31,6 +31,10 @@
 - 给已有数据的表用 `drizzle-kit push` 加 `NOT NULL` 列会因存量行为空而失败 → 新列无默认值，PG 无法直接补非空约束 → 先手动 `ALTER TABLE ... ADD COLUMN`（先可空）并按业务回填历史行，再执行 push 让 drizzle 补 `NOT NULL`、外键与索引。
 - 对话要等模型全部生成完才一次性出现、思考过程不流式 → Next 默认对 rewrite 代理的 `/api` 响应启用 gzip，压缩层攒满缓冲区才 flush，SSE 分片被整段缓冲（响应头 `content-encoding: gzip`，直连 API 则是 `null`）→ `next.config.ts` 设 `compress: false`，让 SSE 绕过压缩层。
 - 以为 `next/font/google` 的 Noto Sans SC 拿不到中文字形（metadata 里 `subsets` 只有 latin/cyrillic 等，没有 chinese-simplified）→ 实际 next/font 会按整份 CSS 下载全部 unicode-range 分片，`subsets` 只影响 preload → 想要中文标题字体时无需自建子集，配 `weight: 'variable'`（一份切片覆盖 100–900，避免 800 字重被浏览器合成）并 `preload: false` 即可。
+- 对话报 `[chat] stream error` / 前端只显示"服务暂时不可用，请稍后重试" → 该文案是 `routes/chat.ts` 的 `createUIMessageStream.onError` 兜底，真实原因被吞掉，只进服务端日志 → 排查必须看 API 进程 stdout 的完整堆栈（含 `url` 与 `statusCode`），别只看前端。
+- `ANTHROPIC_BASE_URL` 写成 `http://127.0.0.1:8788/v1/chat/completions` 后对话 404 → `@ai-sdk/anthropic` 会自动在 baseURL 后拼 `/messages`，实际请求变成 `/v1/chat/completions/messages`（网关无此路由）→ baseURL 只能填到 `/v1` 这一层。
+- 非流式 `generateText` 报 `AI_APICallError: Invalid JSON response`（`statusCode: 200`）→ 网关返回的 `thinking` 块缺少 `signature` 字段，SDK 的 content schema 校验失败（流式路径不校验该字段，所以只有摘要/路线图这类非流式调用挂）→ 调用处加 `providerOptions: { anthropic: { thinking: { type: 'disabled' } } }`。
+- 改了 `apps/api/.env` 后行为没变、日志里 `url` 仍是旧地址 → `process.loadEnvFile()` 只填充**未设置**的变量，shell 里已导出的同名变量优先级更高（如 `~/.claude/settings.json` 注入的 `ANTHROPIC_BASE_URL=http://127.0.0.1:15721`）→ 用 `env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN` 启动，或先 `unset` 再启动。
 
 <!-- BEGIN:turborepo-agent-rules -->
 

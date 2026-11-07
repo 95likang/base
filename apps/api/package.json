@@ -9,9 +9,9 @@
     "./roadmap/spec": "./src/roadmap/spec.ts"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "NODE_EXTRA_CA_CERTS=./wb-gateway.crt tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "NODE_EXTRA_CA_CERTS=./wb-gateway.crt node --import tsx src/index.ts",
     "config:init": "tsx src/config/init.ts",
     "trace:inspect": "tsx src/trace/inspect.ts",
     "test": "vitest run",
