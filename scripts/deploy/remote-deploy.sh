@@ -16,7 +16,21 @@ CLIENT_PORT=3101
 cd "$APP_DIR"
 
 echo "==> 1/5 拉取 $BRANCH"
-git fetch -q origin "$BRANCH"
+# 这台机器到 github.com 的连接偶发超时（表现为 90 秒后 "Empty reply from server"），
+# 实测重试即可成功，所以带重试并放宽 HTTP 超时，避免一次抖动就让整次发布失败。
+fetch_ok=0
+for attempt in 1 2 3; do
+  if git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch -q origin "$BRANCH"; then
+    fetch_ok=1
+    break
+  fi
+  echo "  fetch 第 $attempt 次失败，5 秒后重试..."
+  sleep 5
+done
+if [ "$fetch_ok" -ne 1 ]; then
+  echo "  [错误] 连续 3 次拉取失败，放弃本次发布（未改动任何文件）" >&2
+  exit 1
+fi
 git checkout -q -B "$BRANCH" "origin/$BRANCH"
 git log --oneline -1
 
