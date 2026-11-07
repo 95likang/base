@@ -1,0 +1,54 @@
+#!/bin/bash
+# 在服务器上执行的发布脚本（本地 deploy.sh 和 GitHub Actions 共用同一份）
+#
+# 用法：
+#   remote-deploy.sh <branch>
+#
+# 为什么单独抽出来：本地发布和 CI 发布如果各写一套，迟早会漂移
+# （比如忘了带 API_URL 构建参数，rewrites 就会指向错误的端口）。
+set -euo pipefail
+
+BRANCH="${1:?用法: remote-deploy.sh <branch>}"
+APP_DIR=/srv/base
+API_PORT=3100
+CLIENT_PORT=3101
+
+cd "$APP_DIR"
+
+echo "==> 1/5 拉取 $BRANCH"
+git fetch -q origin "$BRANCH"
+git checkout -q -B "$BRANCH" "origin/$BRANCH"
+git log --oneline -1
+
+echo "==> 2/5 安装依赖"
+pnpm install --frozen-lockfile
+
+# API_URL 在 build 期烘进 Next 的 rewrites，漏了就会指向 localhost:3000
+echo "==> 3/5 构建 client"
+API_URL="http://127.0.0.1:$API_PORT" pnpm --filter client build
+
+echo "==> 4/5 构建 admin"
+pnpm --filter admin build
+mkdir -p /var/www/base-admin
+rsync -a --delete "$APP_DIR/apps/admin/dist/" /var/www/base-admin/
+
+echo "==> 5/5 重载 pm2"
+# 先 API 后 client：client 的 rewrite 目标要保持可用
+pm2 restart base-api --update-env
+sleep 10
+pm2 restart base-client --update-env
+
+# Next 重启后有数秒不监听，nginx 会回 502，必须等端口真正可用
+for _ in $(seq 1 30); do
+  if curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$CLIENT_PORT/login"; then
+    echo "  client 已就绪"
+    break
+  fi
+  sleep 2
+done
+
+echo "==> 健康检查"
+curl -fsS -m 10 "http://127.0.0.1:$API_PORT/"
+echo
+curl -fsS -m 10 -o /dev/null -w "client: %{http_code}\n" "http://127.0.0.1:$CLIENT_PORT/login"
+echo "==> 发布完成：$(git log --oneline -1)"

@@ -1,0 +1,51 @@
+name: Deploy
+
+# CD：CI 在 feature/practice-coach 上通过后，自动发布到生产服务器。
+# 只部署这一个分支，避免随手推的分支直接上线。
+on:
+  workflow_run:
+    # 必须与 ci.yml 的 `name:` 一致
+    workflows: [CI]
+    types: [completed]
+    branches: [feature/practice-coach]
+
+# 同一分支的部署串行执行，新的一次会取消排队中的旧任务
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run 触发时 github.ref 不可靠，用 head_branch 判断；
+    # 只部署成功的 CI 运行
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'feature/practice-coach' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: 配置 SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # known_hosts 从 secret 取，避免 TOFU 期间被中间人冒充
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 上传并执行发布脚本
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_HOST }}" \
+            "cat > /tmp/remote-deploy.sh" < scripts/deploy/remote-deploy.sh
+          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_HOST }}" \
+            "chmod +x /tmp/remote-deploy.sh && bash /tmp/remote-deploy.sh feature/practice-coach"
+
+      - name: 公网健康检查
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 "${{ secrets.DEPLOY_PUBLIC_URL }}/login")
+          echo "/login -> $code"
+          test "$code" = "200"
