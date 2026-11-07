@@ -1,8 +1,16 @@
 #!/bin/bash
 # deployer 账户的强制命令：SSH 连进来只能触发一次发布，不能开 shell。
 #
-# 这个文件要在服务器上存在，并由 authorized_keys 的 command= 指向它：
-#   command="/srv/base/scripts/deploy/run-as-deployer.sh",no-port-forwarding,... <公钥>
+# 部署位置（重要）：必须放在 **git 工作树之外**，例如
+#   /usr/local/lib/base-deploy/run-as-deployer.sh
+# 理由是循环依赖：authorized_keys 的 command= 指向它，而它如果放在 /srv/base 里，
+# 又恰好是仓库跟踪的文件，`git checkout -B` 会因为"未跟踪文件会被覆盖"而中止，
+# 于是这个文件既不能删（CD 就断了）也不能留（checkout 就断了）。
+#
+# 安装：
+#   install -m 755 scripts/deploy/run-as-deployer.sh /usr/local/lib/base-deploy/
+#   echo 'command="/usr/local/lib/base-deploy/run-as-deployer.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding <公钥>' \
+#     > /home/deployer/.ssh/authorized_keys
 #
 # 安全边界：
 # - 授权 key 带 command= 限制，无法执行任意命令

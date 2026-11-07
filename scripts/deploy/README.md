@@ -130,7 +130,7 @@ nginx -t && systemctl reload nginx
 | `scripts/deploy/setup.sh` | 首次初始化 | 数据库名、PG 版本路径 |
 | `scripts/deploy/deploy.sh` | 本地一键发布 | 一般不用改 |
 | `scripts/deploy/remote-deploy.sh` | 服务器侧发布（本地和 CI 共用） | 分支名、端口、应用名 |
-| `scripts/deploy/run-as-deployer.sh` | CI 账户的强制命令 | 分支名（**须与 remote-deploy 一致**） |
+| `scripts/deploy/run-as-deployer.sh` | CI 账户的强制命令 | 分支名（**须与 remote-deploy 一致**）；**安装到 git 工作树外**，见 §6.4 |
 | `.github/workflows/deploy.yml` | CI/CD | 分支名 |
 
 > **端口和应用名有两份真相，必须手工同步**：`remote-deploy.sh` 跑在服务器上，
@@ -402,14 +402,18 @@ jobs:
 useradd -m -s /bin/bash deployer
 mkdir -p /home/deployer/.ssh && chmod 700 /home/deployer/.ssh
 
-# 强制命令 + 禁止转发：这个 key 连进来只能执行一个脚本，拿不到 shell
-echo 'command="/srv/base/scripts/deploy/run-as-deployer.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding <公钥>' \
+# 【关键】强制命令脚本放在 git 工作树之外。
+# 放在 /srv/base 里会产生循环依赖：authorized_keys 指向它，而它又是仓库跟踪的文件，
+# `git checkout -B` 会因"未跟踪文件会被覆盖 / 无法切换"而中止 —— 删了 CD 断，留着 checkout 断。
+install -m 755 -D scripts/deploy/run-as-deployer.sh /usr/local/lib/base-deploy/run-as-deployer.sh
+
+echo 'command="/usr/local/lib/base-deploy/run-as-deployer.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding <公钥>' \
   > /home/deployer/.ssh/authorized_keys
 chmod 600 /home/deployer/.ssh/authorized_keys
 chown -R deployer:deployer /home/deployer/.ssh
 ```
 
-`run-as-deployer.sh`（两端卡口）：
+`run-as-deployer.sh`（两端卡口，仓库里有同名文件，安装到上面的路径）：
 
 ```bash
 #!/bin/bash
@@ -513,6 +517,7 @@ pm2 restart base-api       # API 跑的是源码（tsx），restart 即生效
 | 访问任意路径都是 404（nginx 默认页） | Host 不匹配 `server_name`，落到 `default_server` | `server_name` 写实际访问地址，或用域名 |
 | API 启动即崩、pm2 无限重启 | `DASHSCOPE_API_KEY` 缺失（rag 模块顶层抛错） | 配好该 key，它是必填项 |
 | 部署脚本报 `Empty reply from server`（约 90s 后） | 到 github.com 的连接偶发阻塞 | `git fetch` 带重试（`remote-deploy.sh` 已内置） |
+| `checkout` 报 `untracked working tree files would be overwritten` | 仓库新增了服务器上已存在的未跟踪文件 | 把该文件移出 git 工作树（部署脚本同理） |
 | `git checkout` 报"可疑的仓库所有权" | 文件属主与运行 git 的用户不同 | `git config --global --add safe.directory <路径>` |
 | `pnpm install` 后 tsx 不可用 | esbuild 的构建脚本被跳过 | 一般仍可用；不行就 `pnpm approve-builds` |
 | SSE 对话要等全部生成完才显示 | 压缩/缓冲层攒满才 flush | `compress: false`、nginx `proxy_buffering off` 与 `gzip off` |
