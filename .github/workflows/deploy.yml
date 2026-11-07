@@ -1,51 +1,85 @@
 name: Deploy
 
-# CD：CI 在 feature/practice-coach 上通过后，自动发布到生产服务器。
-# 只部署这一个分支，避免随手推的分支直接上线。
+# CI + CD 合一：检查通过后直接发布到生产服务器。
+#
+# 为什么合并成一个 workflow：`workflow_run` 触发要求被监听的 workflow 也在
+# 默认分支上，而默认分支是 main、实际开发分支是 feature/practice-coach，
+# 两个 workflow 分居两处永远触发不了。放在同一个文件里，只需要这一份在 main 上。
+#
+# 部署范围：只有 DEPLOY_BRANCH 的 push 会发布，其他分支只跑检查。
 on:
-  workflow_run:
-    # 必须与 ci.yml 的 `name:` 一致
-    workflows: [CI]
-    types: [completed]
-    branches: [feature/practice-coach]
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
 
-# 同一分支的部署串行执行，新的一次会取消排队中的旧任务
+# 同分支的发布串行执行，避免两个滚动更新互相踩
 concurrency:
-  group: deploy-production
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  DEPLOY_BRANCH: feature/practice-coach
+
 jobs:
-  deploy:
-    # workflow_run 触发时 github.ref 不可靠，用 head_branch 判断；
-    # 只部署成功的 CI 运行
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'feature/practice-coach' &&
-      github.event.workflow_run.event == 'push'
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # 版本取自根 package.json 的 packageManager 字段
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint & format
+        run: pnpm biome check .
+
+      # 部分模块在 import 期就会校验 DATABASE_URL（src/db/index.ts 的 fail-fast），
+      # 测试本身不连库，给占位值即可。
+      - name: Unit tests
+        run: pnpm --filter api test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/app
+
+      # 构建不需要任何密钥：API_URL 只影响 Next 的 rewrite 目标，
+      # 这里给占位值即可，真正的生产地址在部署机上构建时注入。
+      - name: Build client
+        run: pnpm --filter client build
+        env:
+          API_URL: http://127.0.0.1:3100
+
+      - name: Build admin
+        run: pnpm --filter admin build
+
+  deploy:
+    needs: check
+    # 只在目标分支的 push 上发布；PR 和其他分支只做检查
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', env.DEPLOY_BRANCH)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: 配置 SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # known_hosts 从 secret 取，避免 TOFU 期间被中间人冒充
-          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          # known_hosts 从 secret 取，避免首次连接时被中间人冒充
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: 上传并执行发布脚本
+      - name: 触发服务器发布
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_HOST }}" \
-            "cat > /tmp/remote-deploy.sh" < scripts/deploy/remote-deploy.sh
-          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_HOST }}" \
-            "chmod +x /tmp/remote-deploy.sh && bash /tmp/remote-deploy.sh feature/practice-coach"
+          ssh -o StrictHostKeyChecking=yes -i ~/.ssh/deploy_key \
+            "${{ secrets.DEPLOY_HOST }}" deploy
 
       - name: 公网健康检查
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 "${{ secrets.DEPLOY_PUBLIC_URL }}/login")
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "${{ secrets.DEPLOY_PUBLIC_URL }}/login")
           echo "/login -> $code"
           test "$code" = "200"
