@@ -9,8 +9,8 @@
 #   scripts/deploy/setup.sh
 set -euo pipefail
 
-cd "$(dirname "$0")"
-source ./config.env
+cd "$(dirname "$0")/../.."
+source scripts/deploy/config.env
 
 SSH="ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 $HOST"
 SCP="scp -o StrictHostKeyChecking=no"
@@ -42,14 +42,16 @@ $SSH "su - postgres -c \"psql -tAc \\\"SELECT 1 FROM pg_roles WHERE rolname='pos
   su - postgres -c \"psql -tAc \\\"SELECT 1 FROM pg_database WHERE datname='app'\\\"\" | grep -q 1 || su - postgres -c 'createdb app'
   echo '  数据库 app 就绪'"
 
-echo "==> 4/7 同步代码"
-# 服务器访问不到 github.com，代码由本地 rsync 推送（与 deploy.sh 同一套规则）
-rsync -az --delete \
-  --exclude 'node_modules' --exclude '.next' --exclude 'dist' --exclude '.turbo' \
-  --exclude '.git' --exclude '.usage' --exclude '.traces' --exclude 'workspace' \
-  --exclude '.env' --exclude '.env.*' --exclude 'super-agent.config.json' \
-  -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
-  "$(pwd)/" "$HOST:$APP_DIR/"
+echo "==> 4/7 拉取代码"
+# 仓库是公开的，服务器可直接 clone；safe.directory 用来放行 root 以外的属主
+$SSH "set -e
+git config --global --add safe.directory $APP_DIR 2>/dev/null || true
+if [ -d $APP_DIR/.git ]; then
+  cd $APP_DIR && git fetch origin $BRANCH && git checkout -q -B $BRANCH origin/$BRANCH
+else
+  git clone -b $BRANCH https://github.com/95likang/base.git $APP_DIR
+fi
+cd $APP_DIR && git log --oneline -1"
 
 echo "==> 5/7 安装依赖并推送 schema"
 # db:push 需要 TTY 确认变更，非交互环境必须加 --force
@@ -67,7 +69,7 @@ if [ -f /etc/nginx/conf.d/frontend.conf ]; then
   echo "  旧站点已备份到 $B"
 fi'
 
-$SCP "$(dirname "$0")/nginx-base.conf" "$HOST:/etc/nginx/conf.d/base.conf"
+$SCP "scripts/deploy/nginx-base.conf" "$HOST:/etc/nginx/conf.d/base.conf"
 $SSH "nginx -t && systemctl reload nginx"
 
 echo "==> 7/7 构建前端并启动 pm2"

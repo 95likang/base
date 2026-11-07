@@ -1,26 +1,33 @@
 #!/bin/bash
-# 日常发布：本地 rsync 推代码 → 装依赖 → 构建 → 重载 pm2
+# 日常发布：服务器 git pull → 装依赖 → 构建 → 重载 pm2
 #
 # 用法（在本地仓库根目录执行）：
-#   scripts/deploy/deploy.sh
+#   scripts/deploy/deploy.sh              # 部署当前分支的最新提交
+#   scripts/deploy/deploy.sh <branch>     # 部署指定分支
 #
-# 为什么不用服务器 git pull：这台机器访问不到 github.com（实测超时），
-# 私有仓库也没有服务器侧的凭据，所以统一由本地推送。
+# 前置：本地改动必须先 commit 并 push，服务器只认 git 里的内容。
+# 生产环境的 .env / skills 不在 git 里，不会被 pull 影响。
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 source scripts/deploy/config.env
 
-SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=15 $HOST"
-RSYNC_SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+TARGET_BRANCH="${1:-$(git branch --show-current)}"
 
-echo "==> 1/5 同步代码到 $APP_DIR"
-# .env 不覆盖：生产配置只存在服务器上，本地没有
-rsync -az --delete \
-  --exclude 'node_modules' --exclude '.next' --exclude 'dist' --exclude '.turbo' \
-  --exclude '.git' --exclude '.usage' --exclude '.traces' --exclude 'workspace' \
-  --exclude '.env' --exclude '.env.*' --exclude 'super-agent.config.json' \
-  -e "$RSYNC_SSH" ./ "$HOST:$APP_DIR/"
+# 未提交的改动不会被部署，提前拦住比部署完发现没生效好
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "❌ 有未提交的改动，请先 commit（服务器只拉 git 内容）："
+  git status --short --untracked-files=no
+  exit 1
+fi
+
+SSH="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=15 $HOST"
+
+echo "==> 0/5 推送 $TARGET_BRANCH 到远端"
+git push origin "$TARGET_BRANCH"
+
+echo "==> 1/5 拉取代码"
+$SSH "cd $APP_DIR && git fetch origin $TARGET_BRANCH && git checkout -q -B $TARGET_BRANCH origin/$TARGET_BRANCH && git log --oneline -1"
 
 echo "==> 2/5 安装依赖"
 $SSH "cd $APP_DIR && pnpm install --frozen-lockfile"
