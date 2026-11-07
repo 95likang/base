@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, ClipboardList, LogIn, LogOut } from 'lucide-react'
+import { CheckCircle2, ChevronRight, ClipboardList, LogIn, LogOut } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -50,23 +50,26 @@ export default function MePage() {
       </header>
 
       <div className="grid grid-cols-2 gap-3">
-        <Card className="gap-2 py-4 hover:rotate-0 hover:scale-100 hover:shadow-card">
-          <CardContent className="flex flex-row items-center gap-2">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-full border-2 border-foreground bg-tertiary">
-              <ClipboardList className="size-5" strokeWidth={2.5} />
-            </span>
-            <div>
-              {stats ? (
-                <p className="font-heading text-xl font-extrabold tabular-nums">{stats.plans}</p>
-              ) : statsFailed ? (
-                <p className="font-heading text-xl font-extrabold">—</p>
-              ) : (
-                <Skeleton className="h-7 w-12 rounded-sm" />
-              )}
-              <p className="text-xs text-muted-foreground">训练计划</p>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/plans" className="block rounded-xl">
+          <Card className="h-full gap-2 py-4 hover:rotate-0 hover:scale-100 hover:shadow-card">
+            <CardContent className="flex flex-row items-center gap-2">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full border-2 border-foreground bg-tertiary">
+                <ClipboardList className="size-5" strokeWidth={2.5} />
+              </span>
+              <div>
+                {stats ? (
+                  <p className="font-heading text-xl font-extrabold tabular-nums">{stats.plans}</p>
+                ) : statsFailed ? (
+                  <p className="font-heading text-xl font-extrabold">—</p>
+                ) : (
+                  <Skeleton className="h-7 w-12 rounded-sm" />
+                )}
+                <p className="text-xs text-muted-foreground">训练计划</p>
+              </div>
+              <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden />
+            </CardContent>
+          </Card>
+        </Link>
 
         <Card className="gap-2 py-4 hover:rotate-0 hover:scale-100 hover:shadow-card">
           <CardContent className="flex flex-row items-center gap-2">
