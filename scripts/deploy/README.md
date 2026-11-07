@@ -29,7 +29,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | `setup.sh` | 首次初始化：数据库、依赖、nginx、pm2 |
-| `deploy.sh` | 日常发布：拉代码、装依赖、构建、重载 |
+| `deploy.sh` | 日常发布：git push → 服务器 pull → 构建 → 重载 |
 | `ecosystem.config.cjs` | pm2 进程定义 |
 | `nginx-base.conf` | 站点配置（80 端口） |
 | `config.env` | 主机、路径、端口 |
@@ -59,8 +59,20 @@ scripts/deploy/setup.sh
 ## 日常发布
 
 ```bash
-scripts/deploy/deploy.sh
+scripts/deploy/deploy.sh              # 部署当前分支
+scripts/deploy/deploy.sh main         # 部署指定分支
 ```
+
+脚本会先拦下有未提交改动的情况（服务器只拉 git 内容），然后 push、
+在服务器上 `git pull` → `pnpm install` → 构建 → `pm2 restart`。
+
+服务器 `/srv/base` 是普通 git checkout，**生产 `.env`、`src/.skills`、
+`workspace/` 都不在 git 里**，pull 不会碰它们。
+
+## CI
+
+`.github/workflows/ci.yml` 在每次 push / PR 跑：lint → API 单测 → 两个前端构建。
+构建不需要密钥，测试不连数据库（`DATABASE_URL` 用占位值满足 import 期的 fail-fast）。
 
 ## 运维
 
