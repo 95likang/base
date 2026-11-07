@@ -26,7 +26,9 @@ describe('训练提醒', () => {
   })
 
   it('提醒指向下一场未完成的训练：北京时间换算成 UTC、无按钮、带计划链接', async () => {
-    await syncRoadmapReminder(plan([{ date: '2099-01-01', startTime: '20:00', subskill: '水下呼气' }]))
+    await syncRoadmapReminder(
+      plan([{ date: '2099-01-01', startTime: '20:00', subskill: '水下呼气' }]),
+    )
 
     // 每次同步先删旧任务，避免留着旧时间的提醒
     expect(cronService.remove).toHaveBeenCalledWith('roadmap-reminder:roadmap-1')
@@ -71,7 +73,9 @@ describe('训练提醒', () => {
   })
 
   it('下一场已经开始时只清理旧任务，不发提醒', async () => {
-    await syncRoadmapReminder(plan([{ date: '2020-01-01', startTime: '09:00', subskill: '水下呼气' }]))
+    await syncRoadmapReminder(
+      plan([{ date: '2020-01-01', startTime: '09:00', subskill: '水下呼气' }]),
+    )
 
     expect(cronService.remove).toHaveBeenCalledWith('roadmap-reminder:roadmap-1')
     expect(cronService.add).not.toHaveBeenCalled()
