@@ -6,7 +6,7 @@ name: Deploy
 # 默认分支上，而默认分支是 main、实际开发分支是 feature/practice-coach，
 # 两个 workflow 分居两处永远触发不了。放在同一个文件里，只需要这一份在 main 上。
 #
-# 部署范围：只有 DEPLOY_BRANCH 的 push 会发布，其他分支只跑检查。
+# 部署范围：只有 feature/practice-coach 的 push 会发布，其他分支只跑检查。
 on:
   push:
     branches: [main, 'feature/**']
@@ -16,9 +16,6 @@ on:
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  DEPLOY_BRANCH: feature/practice-coach
 
 jobs:
   check:
@@ -58,8 +55,10 @@ jobs:
 
   deploy:
     needs: check
-    # 只在目标分支的 push 上发布；PR 和其他分支只做检查
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', env.DEPLOY_BRANCH)
+    # 只在目标分支的 push 上发布；PR 和其他分支只做检查。
+    # 注意：job-level `if` 里不能引用 workflow 级 env（env 上下文在 if 中不可用），
+    # 分支名必须直接写死，改动时与上面的 DEPLOY_BRANCH 保持同步。
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/practice-coach'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
